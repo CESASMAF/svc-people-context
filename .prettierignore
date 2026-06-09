@@ -1,0 +1,24 @@
+# Dependências e artefatos gerados
+node_modules/
+dist/
+out/
+coverage/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# Documentação organizacional / tooling — formatação manual própria
+.claude/
+.pipeline/
+# Tooling do spec-kit (templates com placeholders, workflows YAML, extensions) —
+# formatação própria. Os artefatos de feature gerados ficam em specs/ (esses SÃO formatados).
+.specify/
+
+# Espelho offline de docs (copiado do monorepo pai; preserva formatação original)
+handbook/
+
+# Lock files são gerados — não formatar
+bun.lock
+bun.lockb
+package-lock.json
+pnpm-lock.yaml

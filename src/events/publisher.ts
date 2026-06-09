@@ -1,10 +1,10 @@
-import type { JSONValue, Sql } from "postgres";
+import type { Sql } from "../repository/db.ts";
 
 // ─── Types ──────────────────────────────────────────────────────
 
 export type EventData = Record<string, string | undefined>;
 
-export type EventPayload = {
+export interface EventPayload {
   readonly metadata: {
     readonly eventId: string;
     readonly occurredAt: string;
@@ -12,17 +12,17 @@ export type EventPayload = {
   };
   readonly actorId: string;
   readonly data: EventData;
-};
+}
 
-export type DomainEvent = {
+export interface DomainEvent {
   readonly subject: string;
   readonly payload: EventPayload;
-};
+}
 
-export type EventPublisher = {
+export interface EventPublisher {
   readonly publish: (event: DomainEvent) => Promise<void>;
   readonly close: () => Promise<void>;
-};
+}
 
 // ─── Outbox publisher (writes to DB, relay publishes to NATS) ──
 
@@ -30,17 +30,23 @@ export const createOutboxPublisher = (sql: Sql): EventPublisher => ({
   publish: async (event) => {
     await sql`
       INSERT INTO outbox_events (subject, payload)
-      VALUES (${event.subject}, ${sql.json(event.payload as unknown as JSONValue)})
+      VALUES (${event.subject}, ${JSON.stringify(event.payload)}::jsonb)
     `;
   },
-  close: async () => {},
+  close: async () => {
+    /* noop — pool de conexão é encerrado no shutdown do app */
+  },
 });
 
 // ─── Noop publisher (when DB not available, e.g. in tests) ─────
 
 export const createNoopPublisher = (): EventPublisher => ({
-  publish: async () => {},
-  close: async () => {},
+  publish: async () => {
+    /* noop — eventos descartados (sem Outbox em teste) */
+  },
+  close: async () => {
+    /* noop */
+  },
 });
 
 // ─── Event builders ─────────────────────────────────────────────
@@ -62,11 +68,20 @@ const buildEvent = (subject: string, actorId: string, data: EventData): DomainEv
 // NAO entram em event payload. Audit trail correlaciona via personId; CPF pode
 // ser recuperado por consumer autorizado consultando o repository.
 export const events = {
-  personRegistered: (actorId: string, data: { personId: string; fullName: string; birthDate: string }) =>
-    buildEvent("people.person.registered", actorId, data),
+  personRegistered: (
+    actorId: string,
+    data: { personId: string; fullName: string; birthDate: string },
+  ) => buildEvent("people.person.registered", actorId, data),
 
-  personUpdated: (actorId: string, data: { personId: string; fullName?: string; birthDate?: string }) =>
-    buildEvent("people.person.updated", actorId, data),
+  personUpdated: (
+    actorId: string,
+    data: { personId: string; fullName?: string; birthDate?: string },
+  ) => buildEvent("people.person.updated", actorId, data),
+
+  // Erasure (LGPD Art. 18 V). Carrega so o personId — consumidores apagam/
+  // anonimizam suas projecoes correlacionadas. Sem PII no payload.
+  personDeleted: (actorId: string, data: { personId: string }) =>
+    buildEvent("people.person.deleted", actorId, data),
 
   roleAssigned: (actorId: string, data: { personId: string; system: string; role: string }) =>
     buildEvent("people.role.assigned", actorId, data),

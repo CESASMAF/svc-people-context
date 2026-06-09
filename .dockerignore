@@ -5,3 +5,13 @@ tests
 *.md
 .git
 .gitignore
+
+# Tooling / artefatos fora do build (a imagem só usa package.json, bun.lock, src, tsconfig)
+.claude
+.specify
+.pipeline
+docs
+coverage
+.github
+people-context
+*.tsbuildinfo

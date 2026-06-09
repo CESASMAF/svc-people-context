@@ -121,9 +121,7 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const restore = setupMockFetch({
       status: 200,
       body: {
-        results: [
-          { pk: "uuid-1", name: "social_worker", is_superuser: false },
-        ],
+        results: [{ pk: "uuid-1", name: "social_worker", is_superuser: false }],
         pagination: { count: 1 },
       },
     });
@@ -163,7 +161,21 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const restore1 = setupMockFetch({
       status: 200,
       body: {
-        results: [{ pk: 7, uid: "u-7", username: "joao", name: "J", email: "j@x.com", is_active: true, is_superuser: false, groups: [], attributes: {}, date_joined: "2026-01-01T00:00:00Z", last_login: null }],
+        results: [
+          {
+            pk: 7,
+            uid: "u-7",
+            username: "joao",
+            name: "J",
+            email: "j@x.com",
+            is_active: true,
+            is_superuser: false,
+            groups: [],
+            attributes: {},
+            date_joined: "2026-01-01T00:00:00Z",
+            last_login: null,
+          },
+        ],
         pagination: { count: 1 },
       },
     });
@@ -173,7 +185,10 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     if (found.ok && found.data) expect(found.data.pk).toBe(7);
     restore1();
 
-    const restore2 = setupMockFetch({ status: 200, body: { results: [], pagination: { count: 0 } } });
+    const restore2 = setupMockFetch({
+      status: 200,
+      body: { results: [], pagination: { count: 0 } },
+    });
     const empty = await client.findUserByUid("u-x");
     expect(empty.ok).toBe(true);
     if (empty.ok) expect(empty.data).toBeNull();
@@ -201,11 +216,22 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       captured = { url, init };
-      return new Response(JSON.stringify({
-        pk: 1, uid: "u-1", username: "test", name: "Test", email: "t@x.com",
-        is_active: true, is_superuser: false, groups: [], attributes: {},
-        date_joined: "2026-01-01T00:00:00Z", last_login: null,
-      }), { status: 201, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          pk: 1,
+          uid: "u-1",
+          username: "test",
+          name: "Test",
+          email: "t@x.com",
+          is_active: true,
+          is_superuser: false,
+          groups: [],
+          attributes: {},
+          date_joined: "2026-01-01T00:00:00Z",
+          last_login: null,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
     }) as unknown as typeof fetch;
 
     const client = createAuthentikClient({ baseUrl: "http://x", token: "t" });
@@ -213,7 +239,7 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
 
     expect(result.ok).toBe(true);
     expect(captured).not.toBeNull();
-    const body = JSON.parse(captured!.init!.body as string);
+    const body = JSON.parse(captured!.init!.body as string) as Record<string, unknown>;
     expect(body.is_active).toBe(true);
     expect(body.path).toBe("users");
     expect(body.type).toBe("internal");
@@ -263,16 +289,68 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const restore = setupMockFetch({
       status: 200,
       body: {
-        pk: 5, uid: "u-5", username: "ana", name: "Ana", email: "a@x.com",
-        is_active: true, is_superuser: false, groups: [],
+        pk: 5,
+        uid: "u-5",
+        username: "ana",
+        name: "Ana",
+        email: "a@x.com",
+        is_active: true,
+        is_superuser: false,
+        groups: [],
         attributes: { org_id: "acdg-default", person_id: "p-1" },
-        date_joined: "2026-01-01T00:00:00Z", last_login: null,
+        date_joined: "2026-01-01T00:00:00Z",
+        last_login: null,
       },
     });
     const client = createAuthentikClient({ baseUrl: "http://x", token: "t" });
-    const result = await client.updateUserAttributes(5, { org_id: "acdg-default", person_id: "p-1" });
+    const result = await client.updateUserAttributes(5, {
+      org_id: "acdg-default",
+      person_id: "p-1",
+    });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.attributes.org_id).toBe("acdg-default");
+    restore();
+  });
+
+  it("updateUserProfile envia apenas os campos presentes no patch", async () => {
+    let captured: { init?: RequestInit } | null = null;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      captured = { init };
+      return new Response(
+        JSON.stringify({
+          pk: 5,
+          uid: "u-5",
+          username: "ana",
+          name: "Ana Nova",
+          email: "nova@x.com",
+          is_active: true,
+          is_superuser: false,
+          groups: [],
+          attributes: {},
+          date_joined: "2026-01-01T00:00:00Z",
+          last_login: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = createAuthentikClient({ baseUrl: "http://x", token: "t" });
+    const result = await client.updateUserProfile(5, { name: "Ana Nova", email: "nova@x.com" });
+
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(captured!.init!.body as string) as Record<string, unknown>;
+    expect(body.name).toBe("Ana Nova");
+    expect(body.email).toBe("nova@x.com");
+    expect("attributes" in body).toBe(false); // ausente do patch → ausente do body
+    globalThis.fetch = original;
+  });
+
+  it("updateUserProfile propaga erro do request", async () => {
+    const restore = setupMockFetch({ status: 500, body: { detail: "boom" } });
+    const client = createAuthentikClient({ baseUrl: "http://x", token: "t" });
+    const result = await client.updateUserProfile(5, { name: "x" });
+    expect(result.ok).toBe(false);
     restore();
   });
 
@@ -300,9 +378,17 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const restore = setupMockFetch({
       status: 200,
       body: {
-        pk: 1, uid: "u-1", username: "ana", name: "Ana", email: "a@x.com",
-        is_active: true, is_superuser: false, groups: [], attributes: {},
-        date_joined: "2026-01-01T00:00:00Z", last_login: null,
+        pk: 1,
+        uid: "u-1",
+        username: "ana",
+        name: "Ana",
+        email: "a@x.com",
+        is_active: true,
+        is_superuser: false,
+        groups: [],
+        attributes: {},
+        date_joined: "2026-01-01T00:00:00Z",
+        last_login: null,
         groups_obj: [
           { pk: "g-1", name: "social-care:admin", is_superuser: false },
           { pk: "g-2", name: "social-care:worker", is_superuser: false },
@@ -411,6 +497,7 @@ describe("createNoopAuthentikClient — cobertura adicional", () => {
     const { createNoopAuthentikClient } = await import("../../src/idp/index.ts");
     const client = createNoopAuthentikClient();
     expect((await client.updateUserAttributes(1, { org_id: "x" })).ok).toBe(true);
+    expect((await client.updateUserProfile(1, { name: "x", email: "y@z.com" })).ok).toBe(true);
     expect((await client.addUserToGroup("g", 1)).ok).toBe(true);
     expect((await client.removeUserFromGroup("g", 1)).ok).toBe(true);
     expect((await client.deleteUser(1)).ok).toBe(true);
@@ -456,114 +543,111 @@ const AUTHENTIK_URL = process.env["AUTHENTIK_URL"];
 const AUTHENTIK_TOKEN = process.env["AUTHENTIK_TOKEN"];
 const live = AUTHENTIK_URL !== undefined && AUTHENTIK_TOKEN !== undefined;
 
-describe.skipIf(!live)(
-  "createAuthentikClient (smoke contra instancia real)",
-  () => {
-    const client = createAuthentikClient({
-      baseUrl: AUTHENTIK_URL ?? "",
-      token: AUTHENTIK_TOKEN ?? "",
+describe.skipIf(!live)("createAuthentikClient (smoke contra instancia real)", () => {
+  const client = createAuthentikClient({
+    baseUrl: AUTHENTIK_URL ?? "",
+    token: AUTHENTIK_TOKEN ?? "",
+  });
+
+  let saUserPk: AuthentikUserPk | undefined;
+  const saName = `acdg-smoke-${Date.now()}`;
+
+  beforeAll(async () => {
+    // Garantir que existe um group `social_worker` (criado no spike)
+    const group = await client.findGroupByName("social_worker");
+    expect(group.ok).toBe(true);
+  });
+
+  afterAll(async () => {
+    if (saUserPk !== undefined) {
+      await client.deleteUser(saUserPk);
+    }
+  });
+
+  it("createServiceAccount retorna token + user_pk", async () => {
+    const result = await client.createServiceAccount({
+      name: saName,
+      create_group: false,
+      expiring: true,
     });
 
-    let saUserPk: AuthentikUserPk | undefined;
-    const saName = `acdg-smoke-${Date.now()}`;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.username).toBe(saName);
+      expect(result.data.token.length).toBeGreaterThan(20);
+      expect(result.data.user_pk).toBeGreaterThan(0);
+      saUserPk = result.data.user_pk;
+    }
+  });
 
-    beforeAll(async () => {
-      // Garantir que existe um group `social_worker` (criado no spike)
-      const group = await client.findGroupByName("social_worker");
-      expect(group.ok).toBe(true);
+  it("getUser recupera por pk", async () => {
+    if (saUserPk === undefined) throw new Error("SA nao criada");
+    const result = await client.getUser(saUserPk);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.username).toBe(saName);
+    }
+  });
+
+  it("updateUserAttributes persiste org_id + person_id", async () => {
+    if (saUserPk === undefined) throw new Error("SA nao criada");
+    const result = await client.updateUserAttributes(saUserPk, {
+      org_id: "acdg-default",
+      person_id: "01HXTEST",
+      legacy_zitadel_sub: "270366000000000000",
     });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.attributes["org_id"]).toBe("acdg-default");
+      expect(result.data.attributes["person_id"]).toBe("01HXTEST");
+    }
+  });
 
-    afterAll(async () => {
-      if (saUserPk !== undefined) {
-        await client.deleteUser(saUserPk);
-      }
-    });
+  it("addUserToGroup + listUserGroups + removeUserFromGroup", async () => {
+    if (saUserPk === undefined) throw new Error("SA nao criada");
 
-    it("createServiceAccount retorna token + user_pk", async () => {
-      const result = await client.createServiceAccount({
-        name: saName,
-        create_group: false,
-        expiring: true,
-      });
+    const group = await client.findGroupByName("social_worker");
+    expect(group.ok).toBe(true);
+    if (!group.ok || !group.data) throw new Error("group social_worker nao existe");
+    const groupPk = group.data.pk;
 
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.username).toBe(saName);
-        expect(result.data.token.length).toBeGreaterThan(20);
-        expect(result.data.user_pk).toBeGreaterThan(0);
-        saUserPk = result.data.user_pk;
-      }
-    });
+    const add = await client.addUserToGroup(groupPk, saUserPk);
+    expect(add.ok).toBe(true);
 
-    it("getUser recupera por pk", async () => {
-      if (saUserPk === undefined) throw new Error("SA nao criada");
-      const result = await client.getUser(saUserPk);
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.username).toBe(saName);
-      }
-    });
+    const list = await client.listUserGroups(saUserPk);
+    expect(list.ok).toBe(true);
+    if (list.ok) {
+      expect(list.data.some((g) => g.name === "social_worker")).toBe(true);
+    }
 
-    it("updateUserAttributes persiste org_id + person_id", async () => {
-      if (saUserPk === undefined) throw new Error("SA nao criada");
-      const result = await client.updateUserAttributes(saUserPk, {
-        org_id: "acdg-default",
-        person_id: "01HXTEST",
-        legacy_zitadel_sub: "270366000000000000",
-      });
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.attributes["org_id"]).toBe("acdg-default");
-        expect(result.data.attributes["person_id"]).toBe("01HXTEST");
-      }
-    });
+    const remove = await client.removeUserFromGroup(groupPk, saUserPk);
+    expect(remove.ok).toBe(true);
+  });
 
-    it("addUserToGroup + listUserGroups + removeUserFromGroup", async () => {
-      if (saUserPk === undefined) throw new Error("SA nao criada");
+  it("deactivateUser + reactivateUser idempotentes", async () => {
+    if (saUserPk === undefined) throw new Error("SA nao criada");
 
-      const group = await client.findGroupByName("social_worker");
-      expect(group.ok).toBe(true);
-      if (!group.ok || !group.data) throw new Error("group social_worker nao existe");
-      const groupPk = group.data.pk;
+    const off = await client.deactivateUser(saUserPk);
+    expect(off.ok).toBe(true);
 
-      const add = await client.addUserToGroup(groupPk, saUserPk);
-      expect(add.ok).toBe(true);
+    const check1 = await client.getUser(saUserPk);
+    if (check1.ok) expect(check1.data.is_active).toBe(false);
 
-      const list = await client.listUserGroups(saUserPk);
-      expect(list.ok).toBe(true);
-      if (list.ok) {
-        expect(list.data.some((g) => g.name === "social_worker")).toBe(true);
-      }
+    const on = await client.reactivateUser(saUserPk);
+    expect(on.ok).toBe(true);
 
-      const remove = await client.removeUserFromGroup(groupPk, saUserPk);
-      expect(remove.ok).toBe(true);
-    });
+    const check2 = await client.getUser(saUserPk);
+    if (check2.ok) expect(check2.data.is_active).toBe(true);
+  });
 
-    it("deactivateUser + reactivateUser idempotentes", async () => {
-      if (saUserPk === undefined) throw new Error("SA nao criada");
+  it("requestPasswordReset retorna link valido para o acdg-recovery-flow", async () => {
+    if (saUserPk === undefined) throw new Error("SA nao criada");
+    const result = await client.requestPasswordReset(saUserPk);
 
-      const off = await client.deactivateUser(saUserPk);
-      expect(off.ok).toBe(true);
-
-      const check1 = await client.getUser(saUserPk);
-      if (check1.ok) expect(check1.data.is_active).toBe(false);
-
-      const on = await client.reactivateUser(saUserPk);
-      expect(on.ok).toBe(true);
-
-      const check2 = await client.getUser(saUserPk);
-      if (check2.ok) expect(check2.data.is_active).toBe(true);
-    });
-
-    it("requestPasswordReset retorna link valido para o acdg-recovery-flow", async () => {
-      if (saUserPk === undefined) throw new Error("SA nao criada");
-      const result = await client.requestPasswordReset(saUserPk);
-
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.link).toContain("/if/flow/acdg-recovery-flow/");
-        expect(result.data.link).toContain("flow_token=");
-      }
-    });
-  },
-);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.link).toContain("/if/flow/acdg-recovery-flow/");
+      expect(result.data.link).toContain("flow_token=");
+    }
+  });
+});

@@ -44,10 +44,10 @@ describe("AuthGuard — 403 Forbidden", () => {
   it("returns 403 when user lacks required roles", async () => {
     const viewerAuth: AuthContext = { sub: "user-2", roles: ["viewer"] };
     const g = createAuthGuard(async () => viewerAuth);
-    const result = await g(
-      { authorization: "Bearer token", "x-actor-id": "actor" },
-      ["admin", "social_worker"],
-    );
+    const result = await g({ authorization: "Bearer token", "x-actor-id": "actor" }, [
+      "admin",
+      "social_worker",
+    ]);
     expect(result.kind).toBe("forbidden");
     if (result.kind === "forbidden") {
       expect(result.status).toBe(403);
@@ -60,18 +60,15 @@ describe("AuthGuard — 403 Forbidden", () => {
   it("returns 403 when user has empty roles and roles are required", async () => {
     const noRolesAuth: AuthContext = { sub: "user-3", roles: [] };
     const g = createAuthGuard(async () => noRolesAuth);
-    const result = await g(
-      { authorization: "Bearer token", "x-actor-id": "actor" },
-      ["admin"],
-    );
+    const result = await g({ authorization: "Bearer token", "x-actor-id": "actor" }, ["admin"]);
     expect(result.kind).toBe("forbidden");
   });
 
   it("passes when user has at least one of the required roles", async () => {
-    const result = await guard(
-      { authorization: "Bearer token", "x-actor-id": "actor" },
-      ["admin", "superadmin"],
-    );
+    const result = await guard({ authorization: "Bearer token", "x-actor-id": "actor" }, [
+      "admin",
+      "superadmin",
+    ]);
     expect(result.kind).toBe("ok");
   });
 });
@@ -80,9 +77,7 @@ describe("AuthGuard — 403 Forbidden", () => {
 
 describe("AuthGuard — 400 Missing X-Actor-Id", () => {
   it("returns 400 when X-Actor-Id header is missing", async () => {
-    const result = await guard(
-      { authorization: "Bearer token" },
-    );
+    const result = await guard({ authorization: "Bearer token" });
     expect(result.kind).toBe("missing-actor");
     if (result.kind === "missing-actor") {
       expect(result.status).toBe(400);
@@ -92,16 +87,12 @@ describe("AuthGuard — 400 Missing X-Actor-Id", () => {
   });
 
   it("returns 400 when X-Actor-Id is undefined even with valid auth", async () => {
-    const result = await guard(
-      { authorization: "Bearer token", "x-actor-id": undefined },
-    );
+    const result = await guard({ authorization: "Bearer token", "x-actor-id": undefined });
     expect(result.kind).toBe("missing-actor");
   });
 
   it("passes when X-Actor-Id is present", async () => {
-    const result = await guard(
-      { authorization: "Bearer token", "x-actor-id": "actor-99" },
-    );
+    const result = await guard({ authorization: "Bearer token", "x-actor-id": "actor-99" });
     expect(result.kind).toBe("ok");
     if (result.kind === "ok") {
       expect(result.actorId).toBe("actor-99");
@@ -113,17 +104,12 @@ describe("AuthGuard — 400 Missing X-Actor-Id", () => {
 
 describe("AuthGuard — no required roles", () => {
   it("skips role check when requiredRoles is undefined", async () => {
-    const result = await guard(
-      { authorization: "Bearer token", "x-actor-id": "actor" },
-    );
+    const result = await guard({ authorization: "Bearer token", "x-actor-id": "actor" });
     expect(result.kind).toBe("ok");
   });
 
   it("skips role check when requiredRoles is empty array", async () => {
-    const result = await guard(
-      { authorization: "Bearer token", "x-actor-id": "actor" },
-      [],
-    );
+    const result = await guard({ authorization: "Bearer token", "x-actor-id": "actor" }, []);
     expect(result.kind).toBe("ok");
   });
 });

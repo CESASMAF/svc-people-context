@@ -1,5 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import { events, createNoopPublisher, createOutboxPublisher, type DomainEvent } from "../../src/events/publisher.ts";
+import {
+  events,
+  createNoopPublisher,
+  createOutboxPublisher,
+  type DomainEvent,
+} from "../../src/events/publisher.ts";
 
 // ─── Event builders ────────────────────────────────────────────
 
@@ -80,8 +85,16 @@ describe("events.roleReactivated", () => {
 
 describe("event metadata", () => {
   it("generates unique eventIds for different events", () => {
-    const e1 = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
-    const e2 = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
+    const e1 = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
+    const e2 = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
     expect(e1.payload.metadata.eventId).not.toBe(e2.payload.metadata.eventId);
   });
 });
@@ -91,7 +104,11 @@ describe("event metadata", () => {
 describe("createNoopPublisher", () => {
   it("publish does nothing (no errors)", async () => {
     const publisher = createNoopPublisher();
-    const event = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
+    const event = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
     await publisher.publish(event);
     // no error = success
   });
@@ -105,18 +122,15 @@ describe("createNoopPublisher", () => {
 // ─── Outbox publisher ──────────────────────────────────────────
 
 describe("createOutboxPublisher", () => {
-  it("writes event to outbox table using sql.json()", async () => {
-    const inserted: Array<{ subject: string; payload: unknown }> = [];
+  it("writes event to outbox table (payload serializado como jsonb)", async () => {
+    const inserted: { subject: string; payload: unknown }[] = [];
 
-    const fakeSql = Object.assign(
-      (strings: TemplateStringsArray, ...params: unknown[]) => {
-        if (strings.join("").includes("INSERT INTO outbox_events")) {
-          inserted.push({ subject: params[0] as string, payload: params[1] });
-        }
-        return Promise.resolve([]);
-      },
-      { json: (value: unknown) => value },
-    ) as unknown as import("postgres").Sql;
+    const fakeSql = ((strings: TemplateStringsArray, ...params: unknown[]) => {
+      if (strings.join("").includes("INSERT INTO outbox_events")) {
+        inserted.push({ subject: params[0] as string, payload: params[1] });
+      }
+      return Promise.resolve([]);
+    }) as unknown as import("../../src/repository/db.ts").Sql;
 
     const publisher = createOutboxPublisher(fakeSql);
     const event = events.personRegistered("actor-1", {
@@ -129,7 +143,7 @@ describe("createOutboxPublisher", () => {
 
     expect(inserted.length).toBe(1);
     expect(inserted[0]!.subject).toBe("people.person.registered");
-    const payload = inserted[0]!.payload as DomainEvent["payload"];
+    const payload = JSON.parse(inserted[0]!.payload as string) as DomainEvent["payload"];
     expect(payload.actorId).toBe("actor-1");
     expect(payload.data.personId).toBe("p-1");
   });

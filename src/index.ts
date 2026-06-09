@@ -11,6 +11,7 @@ import { createAuthentikClient, createNoopAuthentikClient } from "./idp/index.ts
 import { createHealthRoutes } from "./routes/health.ts";
 import { createPeopleRoutes } from "./routes/people.ts";
 import { createRolesRoutes } from "./routes/roles.ts";
+import { createAdminRoutes } from "./routes/admin.ts";
 
 // ─── Bootstrap ──────────────────────────────────────────────────
 
@@ -24,42 +25,43 @@ const guard = createAuthGuard(createJwtVerifier());
 const publisher = createOutboxPublisher(sql);
 
 // IdP client: Authentik (ADR-027).
-const idp = env.authentik.baseUrl && env.authentik.token
-  ? createAuthentikClient({
-      baseUrl: env.authentik.baseUrl,
-      token: env.authentik.token,
-    })
-  : createNoopAuthentikClient();
+const idp =
+  env.authentik.baseUrl !== undefined && env.authentik.token !== undefined
+    ? createAuthentikClient({
+        baseUrl: env.authentik.baseUrl,
+        token: env.authentik.token,
+      })
+    : createNoopAuthentikClient();
 
-if (!env.authentik.baseUrl) {
+if (env.authentik.baseUrl === undefined) {
   console.log("[idp] AUTHENTIK_URL not set — user provisioning disabled (noop client)");
 } else {
   console.log(`[idp] Authentik client active (${env.authentik.baseUrl})`);
 }
 
-const relay = env.nats.url
-  ? await createOutboxRelay(sql, env.nats.url)
-  : createNoopRelay();
+const relay =
+  env.nats.url !== undefined ? await createOutboxRelay(sql, env.nats.url) : createNoopRelay();
 relay.start();
 
 const app = new Elysia()
   .use(createHealthRoutes({ sql, relay }))
   .use(createPeopleRoutes({ people, guard, publisher, idp }))
   .use(createRolesRoutes({ people, roles, guard, publisher, idp }))
+  .use(createAdminRoutes({ people, guard, idp }))
   .listen({ port: env.port, hostname: env.host });
 
-console.log(`people-context running on ${app.server?.hostname}:${app.server?.port}`);
+console.log(`people-context running on ${env.host}:${env.port}`);
 
 // ─── Graceful shutdown ──────────────────────────────────────────
 
-const shutdown = async (signal: string) => {
+const shutdown = async (signal: string): Promise<void> => {
   console.log(`[shutdown] ${signal} received — draining...`);
   await relay.stop();
-  app.stop();
-  await sql.end({ timeout: 5 });
+  await app.stop();
+  await sql.close({ timeout: 5 });
   console.log("[shutdown] Clean exit");
   process.exit(0);
 };
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

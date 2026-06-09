@@ -25,8 +25,7 @@ import type {
 // ADR-029). Se nao existir, role-sync e best-effort: log + skip, mas o
 // state local no Postgres do people-context sempre persiste.
 
-export const roleKeyForGroup = (system: string, role: string): string =>
-  `${system}:${role}`;
+export const roleKeyForGroup = (system: string, role: string): string => `${system}:${role}`;
 
 // ─── Helpers para routes ───────────────────────────────────────
 
@@ -64,7 +63,7 @@ export const syncRoleAssignment = async (
   if (!sync.ok) {
     console.warn(
       `[idp] role-sync addUserToGroup failed personId=${args.personId} ` +
-      `group=${groupPk} code=${sync.code}: ${sync.message}`,
+        `group=${groupPk} code=${sync.code}: ${sync.message}`,
     );
   }
 };
@@ -86,19 +85,63 @@ export const syncRoleRemoval = async (
   if (!sync.ok) {
     console.warn(
       `[idp] role-sync removeUserFromGroup failed personId=${args.personId} ` +
-      `group=${groupPk} code=${sync.code}: ${sync.message}`,
+        `group=${groupPk} code=${sync.code}: ${sync.message}`,
     );
   }
 };
 
-// ─── Username derivation ───────────────────────────────────────
+// ─── Username derivation + unicidade ───────────────────────────
 
-// Derive username estavel a partir do email (parte antes do @).
-// Code-review MEDIUM-15: colisoes silenciosas possiveis (`joao@x.com` e
-// `joao@y.com` produzem mesmo username). Authentik vai rejeitar o segundo
-// com 409 unique constraint — capturado como warning IDP-001.
+// Deriva o username BASE a partir do email (parte antes do @).
 export const usernameFromEmail = (email: string): string =>
   email.split("@")[0]?.toLowerCase() ?? email.toLowerCase();
+
+// Resolve um username unico a partir de um base, consultando o Authentik.
+// Code-review MEDIUM-15 fix: elimina a colisao silenciosa (`joao@x.com` e
+// `joao@y.com` derivavam o mesmo `joao` e o 2o falhava com 409 -> warning).
+// Tenta `base`, `base2`, `base3`... ate USERNAME_MAX_ATTEMPTS. Se a checagem
+// no IdP falhar (rede), devolve o candidato e deixa o `createUser` decidir.
+// Esgotando as tentativas, sufixa com fragmento aleatorio (garante unicidade).
+const USERNAME_MAX_ATTEMPTS = 50;
+
+export const resolveUniqueUsername = async (
+  idp: AuthentikClient,
+  base: string,
+): Promise<string> => {
+  for (let i = 0; i < USERNAME_MAX_ATTEMPTS; i++) {
+    const candidate = i === 0 ? base : `${base}${i + 1}`;
+    const found = await idp.findUserByUsername(candidate);
+    if (!found.ok) return candidate;
+    if (found.data === null) return candidate;
+  }
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+};
+
+// ─── Sincroniza perfil (name/email) com o IdP (PUT /people/:id) ─
+//
+// Best-effort pos-DB: o registro local e a fonte de verdade; uma falha de
+// sync gera warning e nao quebra o update (alinhado ao role-sync). Erros do
+// Authentik nao vazam (HIGH-7) — ficam no log.
+export const syncPersonProfileToIdp = async (
+  idp: AuthentikClient,
+  args: {
+    readonly idpUserPk: number;
+    readonly name: string;
+    readonly email?: string;
+    readonly personId: string;
+  },
+): Promise<void> => {
+  const result = await idp.updateUserProfile(args.idpUserPk, {
+    name: args.name,
+    ...(args.email !== undefined && args.email !== "" ? { email: args.email } : {}),
+  });
+  if (!result.ok) {
+    console.warn(
+      `[idp] profile-sync failed personId=${args.personId} ` +
+        `pk=${args.idpUserPk} code=${result.code}: ${result.message}`,
+    );
+  }
+};
 
 // ─── Provision user no IdP ─────────────────────────────────────
 //
@@ -110,47 +153,57 @@ export const usernameFromEmail = (email: string): string =>
 // mas nao falham o provision: usuario ja foi criado, falta apenas a senha
 // inicial (recuperavel via recovery flow).
 
-export type ProvisionUserInput = {
+export interface ProvisionUserInput {
   readonly username: string;
   readonly name: string;
   readonly email: string;
   readonly initialPassword?: string;
   readonly attributes: ACDGUserAttributes;
-};
+}
 
-export type ProvisionedUser = {
+export interface ProvisionedUser {
   readonly uid: AuthentikUserUid;
   readonly pk: AuthentikUserPk;
-};
+}
+
+// `input.username` e tratado como BASE: a unicidade e resolvida via
+// resolveUniqueUsername. Em caso de 409 (race entre a checagem e o create),
+// re-resolve e tenta de novo ate PROVISION_MAX_ATTEMPTS.
+const PROVISION_MAX_ATTEMPTS = 3;
 
 export const provisionUserInIdp = async (
   idp: AuthentikClient,
   input: ProvisionUserInput,
 ): Promise<AuthentikResult<ProvisionedUser>> => {
-  const createResult = await idp.createUser({
-    username: input.username,
-    name: input.name,
-    email: input.email,
-    is_active: true,
-    path: "users",
-    type: "internal",
-    attributes: input.attributes,
-  });
+  for (let attempt = 0; attempt < PROVISION_MAX_ATTEMPTS; attempt++) {
+    const username = await resolveUniqueUsername(idp, input.username);
+    const createResult = await idp.createUser({
+      username,
+      name: input.name,
+      email: input.email,
+      is_active: true,
+      path: "users",
+      type: "internal",
+      attributes: input.attributes,
+    });
 
-  if (!createResult.ok) return createResult;
-
-  if (input.initialPassword) {
-    const pwdResult = await idp.setPassword(createResult.data.pk, input.initialPassword);
-    if (!pwdResult.ok) {
-      console.warn(
-        `[idp] setPassword failed for pk=${createResult.data.pk} ` +
-        `code=${pwdResult.code} — user criado, senha inicial nao aplicada (recuperavel via recovery)`,
-      );
+    if (createResult.ok) {
+      if (input.initialPassword !== undefined && input.initialPassword !== "") {
+        const pwdResult = await idp.setPassword(createResult.data.pk, input.initialPassword);
+        if (!pwdResult.ok) {
+          console.warn(
+            `[idp] setPassword failed for pk=${createResult.data.pk} ` +
+              `code=${pwdResult.code} — user criado, senha inicial nao aplicada (recuperavel via recovery)`,
+          );
+        }
+      }
+      return { ok: true, data: { uid: createResult.data.uid, pk: createResult.data.pk } };
     }
+
+    // 409 = colisao de username (race). Re-resolve e tenta novamente.
+    // Qualquer outro erro e nao recuperavel — devolve direto.
+    if (createResult.code !== 409) return createResult;
   }
 
-  return {
-    ok: true,
-    data: { uid: createResult.data.uid, pk: createResult.data.pk },
-  };
+  return { ok: false, code: 409, message: "username conflict after retries" };
 };

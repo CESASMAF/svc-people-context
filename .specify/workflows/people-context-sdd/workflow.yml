@@ -1,0 +1,250 @@
+schema_version: '1.0'
+workflow:
+  id: 'people-context-sdd'
+  name: 'people-context SDD (RED→YELLOW→GREEN, máximo rigor)'
+  version: '1.0.0' # port do core-api-sdd 2.1.0, adaptado à stack Bun/Elysia/Postgres/funcional
+  author: 'acdg / people-context'
+  description: >
+    Pipeline spec-driven do people-context: descoberta → SPEC → camadas/ports → ADRs →
+    métricas → plano → BDD → TDD (RED) → implementação (YELLOW) → review → gate W3
+    (GREEN). Máximo rigor: cada fase consulta a persona-consultora ACDG (prompts MCP
+    /acdg-skills:*) e delega a execução ao agente interno da camada; decisões-chave
+    (DDD, ADR, TDD, review) exigem citação canônica literal (≥4 linhas) via as tools
+    skills_buscar/skills_citar.
+
+requires:
+  speckit_version: '>=0.8.5'
+  integrations:
+    any:
+      - 'claude'
+
+inputs:
+  spec:
+    type: string
+    required: true
+    prompt: 'Descreva a feature do people-context (domínio, endpoint, evento, migration…)'
+  integration:
+    type: string
+    default: 'auto'
+    prompt: 'Integração (auto usa a configurada: claude)'
+  scope:
+    type: string
+    default: 'contracts-only'
+    enum: ['contracts-only', 'full']
+
+# ── Pré-requisito: o MCP acdg-skills precisa estar conectado (people-context/.mcp.json) ──
+# As personas são consultadas como prompts: /acdg-skills:<persona>. A citação canônica
+# obrigatória sai das tools skills_buscar / skills_citar. Fatos frios de doc de stack
+# (Elysia/Postgres/NATS/Authentik) vêm da Reference Network (acdg-ref:ref-*).
+#
+# ── Modelo de orquestração (in-session, NÃO runtime headless) ──
+# Este arquivo é a RECEITA dos 17 steps, NÃO o runtime. O Claude orquestra in-session:
+# `command: speckit.*` → invoca a Skill /speckit-* nesta sessão; `type: gate` → apresentação
+# em TEXTO PURO (ver Protocolo de gate); citação → skills_buscar/citar (acdg-skills MCP).
+# NÃO usar `specify workflow run` como executor (gate é TTY-only e command spawna headless
+# sem o MCP). Detalhe em .specify/.smoke-test/RUNBOOK.md §1.
+#
+# ── Protocolo de gate (apresentação dos `type: gate`) ──
+# Todo step `type: gate` é apresentado ao humano como TEXTO PURO em markdown (cabeçalho +
+# resumo do artefato + "Próximo se aprovar"), e o humano responde digitando approve/reject/
+# ajustar. NÃO usar o widget AskUserQuestion (trava no terminal Warp). Spec em
+# .specify/.smoke-test/RUNBOOK.md §6.
+#
+# ── Agente interno por camada (executor das fases; CLAUDE.md §agents) ──
+#   domain   → functional-domain-expert      application → application-expert
+#   repository → repository-expert            routes     → elysia-http-expert
+#   events   → events-outbox-expert           idp/auth   → auth-idp-expert
+#   testes   → test-writer                    roteamento → people-orchestrator
+#
+# ── Templates por fase (em .specify/templates/) ──
+#   0 discovery → discovery-template.md      1 spec → spec-template.md
+#   2 domain    → domain-template.md         3 adr  → adr-template.md
+#   4 metrics   → metrics-template.md        5 plan → plan-template.md
+#   6 bdd       → bdd-template.md            7 tdd  → tdd-template.md
+#   9 review    → review-template.md         (checklists → checklist-template.md)
+# Cada gate abaixo deve preencher o artefato a partir do template correspondente.
+
+# ── Passo de SCAFFOLD (antes da discovery) ──
+# ANTES da discovery, criar a branch + a pasta da feature, porque o step 0 (discovery)
+# já grava specs/<feature>/discovery.md. O Claude roda no início:
+#   bash .specify/scripts/bash/create-new-feature.sh --json --short-name "<slug>" "<desc>"
+# Consequência: o hook `before_specify: git.feature` roda com allow-existing (ou é pulado)
+# — por isso ele está `optional: true` no extensions.yml. NÃO criar uma 2ª feature.
+
+steps:
+  # ── 0. DESCOBERTA ──────────────────────────────────────────────────────────
+  - id: discovery
+    type: gate
+    message: >
+      FASE 0 — DESCOBERTA. Consulte /acdg-skills:requirements-engineer. Elicite a feature
+      (INVEST, stakeholders, escopo, restrições) e grave specs/<feature>/discovery.md
+      (a branch/pasta já foi criada no scaffold — não criar outra).
+      Aprovar quando a descoberta estiver registrada.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 1. SPEC ────────────────────────────────────────────────────────────────
+  - id: specify
+    command: speckit.specify
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  - id: clarify
+    command: speckit.clarify
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  - id: review-spec
+    type: gate
+    message: >
+      FASE 1 — SPEC. Revise spec.md (com /acdg-skills:requirements-engineer): histórias INVEST,
+      critérios de aceitação, seção "Impacto Arquitetural (people-context)". Aprovar para modelar
+      o domínio.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 1.5 RECON do código existente (só p/ EXTENSÃO) ─────────────────────────
+  # Para features que ESTENDEM código (não greenfield), modelar domínio/ADR no vácuo
+  # diverge do padrão real (ex.: inventar VO quando o repository usa branded type na borda).
+  # Este gate força ler a camada-alvo ANTES do domain. GREENFIELD: aprovar com "N/A".
+  - id: recon
+    type: gate
+    message: >
+      FASE 1.5 — RECON. A feature estende código existente? Se SIM, leia a camada-alvo
+      (tipos, ports, padrões — ex.: PersonRepository/RoleRepository, validateCreatePerson,
+      branded types toCpf/toPersonId, AuthentikResult, Outbox publisher) e grave
+      specs/<feature>/recon.md com os padrões a REUSAR e o que NÃO reinventar.
+      Se a feature for greenfield, aprovar com "N/A — greenfield". Aprovar para modelar o
+      domínio já ancorado no código real.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 2. DOMÍNIO / CAMADAS (citação obrigatória) ─────────────────────────────
+  - id: domain
+    type: gate
+    message: >
+      FASE 2 — DOMÍNIO/CAMADAS (RIGOR: citação obrigatória). Consulte /acdg-skills:ddd-architect
+      e delegue ao functional-domain-expert. (Se houve RECON, ancore o modelo nos padrões reais.)
+      Defina branded types, value objects, validação (ValidationResult), eventos e linguagem
+      ubíqua; respeite o import boundary (domain SEM deps externas). Grave specs/<feature>/domain.md.
+      CADA decisão de fronteira de camada/VO exige citação literal (≥4 linhas) via skills_citar
+      (Evans/Vernon). Aprovar só com as citações registradas.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 3. ADRs (citação obrigatória) ──────────────────────────────────────────
+  - id: adr
+    type: gate
+    message: >
+      FASE 3 — ADRs (RIGOR: citação obrigatória). Consulte /acdg-skills:software-architect.
+      Para cada decisão arquitetural relevante, escreva specs/<feature>/adr/NNNN-*.md (contexto,
+      decisão, consequências, alternativas) com citação canônica (skills_citar). Não contrarie
+      ADR aceito nem as rules de .claude/rules/ — crie novo que `supersedes`. Aprovar com ADR(s)
+      + citações.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 4. MÉTRICAS / NFRs (citação obrigatória) ───────────────────────────────
+  - id: metrics
+    type: gate
+    message: >
+      FASE 4 — MÉTRICAS/NFRs (RIGOR). Consulte /acdg-skills:software-architect e
+      /acdg-skills:requirements-engineer. Defina métricas funcionais, não-funcionais e de
+      performance (mensuráveis) em specs/<feature>/metrics.md; ancore os NFRs com citação
+      (skills_citar). Aprovar quando as métricas estiverem mensuráveis e citadas.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 5. PLANO ───────────────────────────────────────────────────────────────
+  - id: plan
+    command: speckit.plan
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  - id: review-plan
+    type: gate
+    message: >
+      FASE 5 — PLANO. Constitution Check (princípios I–X). Para schema/persistência consulte
+      /acdg-skills:database-engineer (citação Ramakrishnan) e delegue ao repository-expert.
+      Confira "Migrations postgres.js" e "Estimativa W0 (S/M/L)" no plan.md. Aprovar para
+      gerar BDD/tasks.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 6. BDD ─────────────────────────────────────────────────────────────────
+  - id: bdd
+    type: gate
+    message: >
+      FASE 6 — BDD. Consulte /acdg-skills:requirements-engineer e /acdg-skills:tdd-strategist.
+      Escreva os cenários Given-When-Then em specs/<feature>/bdd/*.feature, derivados dos
+      critérios de aceitação. Aprovar quando os cenários cobrirem as histórias P1.
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: tasks
+    command: speckit.tasks
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  # ── 7. TDD — RED (citação obrigatória) ─────────────────────────────────────
+  - id: tdd-red
+    type: gate
+    message: >
+      FASE 7 — TDD/RED 🔴 (RIGOR). Consulte /acdg-skills:tdd-strategist (citação Kent Beck) e
+      delegue ao test-writer. Abra o ticket (bun run pipeline:state init <ticket> --size <S|M|L>)
+      e escreva os testes W0 (bun:test) a partir do BDD — eles DEVEM falhar por inexistência da
+      API. Rode `bun test` e confirme 🔴 RED. Aprovar SOMENTE com os testes vermelhos pelo
+      motivo certo.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 8. IMPLEMENTAÇÃO — YELLOW ──────────────────────────────────────────────
+  - id: implement
+    command: speckit.implement
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  - id: yellow
+    type: gate
+    message: >
+      FASE 8 — YELLOW 🟡. A implementação mínima (W1) deve fazer os testes passarem. Delegue ao
+      agente interno da camada (functional-domain-expert / repository-expert / elysia-http-expert
+      / events-outbox-expert / auth-idp-expert). Rode `bun test` e confirme verde funcional.
+      Estado YELLOW = testes passam, mas review/qualidade/citações ainda pendentes. Aprovar para
+      o review.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 9. REVIEW W2 (citação obrigatória) ─────────────────────────────────────
+  - id: review-w2
+    type: gate
+    message: >
+      FASE 9 — REVIEW/W2 (RIGOR). Consulte /acdg-skills:clean-code-reviewer e, se houver
+      superfície sensível (auth, PII, SQL), /acdg-skills:security-reviewer. Audit read-only;
+      grave specs/<feature>/review.md (APPROVED/REJECTED + issues) com citação (Uncle Bob/OWASP).
+      Cheque as invariantes de .claude/rules/ (no-class, no-throw na fronteira, CPF fora de evento
+      NATS, SQL parametrizado). Máx. 3 rounds. Aprovar quando o review estiver APPROVED.
+    options: [approve, reject]
+    on_reject: abort
+
+  # ── 10. ANALYZE (consistência cross-artefato) ──────────────────────────────
+  - id: analyze
+    command: speckit.analyze
+    integration: '{{ inputs.integration }}'
+    input:
+      args: '{{ inputs.spec }}'
+
+  # ── 11. GATE W3 — GREEN ────────────────────────────────────────────────────
+  - id: green
+    type: gate
+    message: >
+      FASE 10 — GREEN 🟢 (regressão zero). Rode /speckit-verify (W3): typecheck + format:check +
+      lint + test + coverage (≥95%). GREEN = testes + review W2 + gate W3 + todas as citações das
+      decisões-chave registradas. Aprovar SÓ com tudo verde e citado.
+    options: [approve, reject]
+    on_reject: abort

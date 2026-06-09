@@ -1,19 +1,19 @@
-import { connect, type NatsConnection, StringCodec } from "nats";
-import type { Sql } from "postgres";
+import { connect, Events, type NatsConnection, StringCodec } from "nats";
+import type { Sql } from "../repository/db.ts";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type OutboxRow = {
+interface OutboxRow {
   readonly id: string;
   readonly subject: string;
   readonly payload: string;
-};
+}
 
-export type OutboxRelay = {
+export interface OutboxRelay {
   readonly start: () => void;
   readonly stop: () => Promise<void>;
   readonly isConnected: () => boolean;
-};
+}
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -24,10 +24,7 @@ const RECONNECT_WAIT_MS = 2000;
 
 // ─── Relay (polls outbox table, publishes to NATS) ─────────────
 
-export const createOutboxRelay = async (
-  sql: Sql,
-  natsUrl: string,
-): Promise<OutboxRelay> => {
+export const createOutboxRelay = async (sql: Sql, natsUrl: string): Promise<OutboxRelay> => {
   const sc = StringCodec();
   let timer: ReturnType<typeof setInterval> | null = null;
   let polling = false;
@@ -42,19 +39,19 @@ export const createOutboxRelay = async (
 
   // Track connection state
   let connected = true;
-  (async () => {
+  void (async () => {
     for await (const status of nc.status()) {
-      if (status.type === "disconnect" || status.type === "error") {
+      if (status.type === Events.Disconnect || status.type === Events.Error) {
         connected = false;
-        console.warn(`[outbox-relay] NATS ${status.type}: ${status.data ?? "unknown"}`);
-      } else if (status.type === "reconnect") {
+        console.warn(`[outbox-relay] NATS ${status.type}: ${JSON.stringify(status.data)}`);
+      } else if (status.type === Events.Reconnect) {
         connected = true;
         console.log("[outbox-relay] NATS reconnected");
       }
     }
   })();
 
-  const poll = async () => {
+  const poll = async (): Promise<void> => {
     if (polling || !connected) return;
     polling = true;
 
@@ -79,7 +76,10 @@ export const createOutboxRelay = async (
           await nc.flush();
           publishedIds.push(row.id);
         } catch (err) {
-          console.error(`[outbox-relay] Failed to publish event ${row.id}:`, err instanceof Error ? err.message : err);
+          console.error(
+            `[outbox-relay] Failed to publish event ${row.id}:`,
+            err instanceof Error ? err.message : err,
+          );
           break;
         }
       }
@@ -88,7 +88,7 @@ export const createOutboxRelay = async (
         await sql`
           UPDATE outbox_events
           SET published = true, published_at = now()
-          WHERE id = ANY(${publishedIds})
+          WHERE id = ANY(${sql.array(publishedIds)})
         `;
         console.log(`[outbox-relay] Published ${publishedIds.length}/${rows.length} event(s)`);
       }
@@ -101,13 +101,13 @@ export const createOutboxRelay = async (
 
   return {
     start: () => {
-      if (timer) return;
-      timer = setInterval(poll, POLL_INTERVAL_MS);
+      if (timer !== null) return;
+      timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
       console.log(`[outbox-relay] Polling every ${POLL_INTERVAL_MS}ms`);
-      poll();
+      void poll();
     },
     stop: async () => {
-      if (timer) {
+      if (timer !== null) {
         clearInterval(timer);
         timer = null;
       }
@@ -123,6 +123,8 @@ export const createNoopRelay = (): OutboxRelay => ({
   start: () => {
     console.log("[outbox-relay] NATS_URL not set — relay disabled");
   },
-  stop: async () => {},
+  stop: async () => {
+    /* noop — sem conexão NATS para drenar */
+  },
   isConnected: () => false,
 });

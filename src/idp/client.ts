@@ -8,16 +8,17 @@ import type {
   GroupSummary,
   RecoveryLinkResponse,
   ServiceAccountResponse,
+  UpdateUserProfileInput,
   UserResponse,
   ACDGUserAttributes,
 } from "./types.ts";
 
 // ─── Config ────────────────────────────────────────────────────
 
-type AuthentikClientConfig = {
+interface AuthentikClientConfig {
   readonly baseUrl: string;
   readonly token: string;
-};
+}
 
 // ─── HTTP helper (never throws — boundary do Result) ───────────
 //
@@ -42,7 +43,7 @@ const request = async <T>(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-    // 204 No Content: caller deve usar T = void. Code-review HIGH-5:
+    // 204 No Content: caller deve usar T = undefined. Code-review HIGH-5:
     // restringe ao status 204 estritamente (nao confundir com 200 body vazio).
     // O cast `as T` e necessario porque o protocolo HTTP nao tem como expressar
     // "this response carries no body" no nivel de tipos do fetch.
@@ -80,19 +81,17 @@ const request = async <T>(
 
 // ─── DRF paginated response ────────────────────────────────────
 
-type PaginatedResponse<T> = {
+interface PaginatedResponse<T> {
   readonly results: readonly T[];
   readonly pagination: { readonly count: number };
-};
+}
 
 // ─── Factory ───────────────────────────────────────────────────
 
-export const createAuthentikClient = (
-  config: AuthentikClientConfig,
-): AuthentikClient => ({
+export const createAuthentikClient = (config: AuthentikClientConfig): AuthentikClient => ({
   // ── Users ────────────────────────────────────────────────────
 
-  createUser: (input: CreateUserInput) =>
+  createUser: async (input: CreateUserInput) =>
     request<UserResponse>(config, "POST", "/api/v3/core/users/", {
       username: input.username,
       name: input.name,
@@ -104,7 +103,7 @@ export const createAuthentikClient = (
       attributes: input.attributes ?? {},
     }),
 
-  getUser: (userPk: AuthentikUserPk) =>
+  getUser: async (userPk: AuthentikUserPk) =>
     request<UserResponse>(config, "GET", `/api/v3/core/users/${userPk}/`),
 
   findUserByUsername: async (username: string) => {
@@ -143,50 +142,40 @@ export const createAuthentikClient = (
   },
 
   deactivateUser: async (userPk: AuthentikUserPk) => {
-    const result = await request<UserResponse>(
-      config,
-      "PATCH",
-      `/api/v3/core/users/${userPk}/`,
-      { is_active: false },
-    );
+    const result = await request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
+      is_active: false,
+    });
     if (!result.ok) return result;
     return { ok: true as const, data: undefined };
   },
 
   reactivateUser: async (userPk: AuthentikUserPk) => {
-    const result = await request<UserResponse>(
-      config,
-      "PATCH",
-      `/api/v3/core/users/${userPk}/`,
-      { is_active: true },
-    );
+    const result = await request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
+      is_active: true,
+    });
     if (!result.ok) return result;
     return { ok: true as const, data: undefined };
   },
 
-  deleteUser: (userPk: AuthentikUserPk) =>
-    request<void>(config, "DELETE", `/api/v3/core/users/${userPk}/`),
+  deleteUser: async (userPk: AuthentikUserPk) =>
+    request<undefined>(config, "DELETE", `/api/v3/core/users/${userPk}/`),
 
-  updateUserAttributes: (
-    userPk: AuthentikUserPk,
-    attributes: ACDGUserAttributes,
-  ) =>
-    request<UserResponse>(
-      config,
-      "PATCH",
-      `/api/v3/core/users/${userPk}/`,
-      { attributes },
-    ),
+  updateUserAttributes: async (userPk: AuthentikUserPk, attributes: ACDGUserAttributes) =>
+    request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, { attributes }),
+
+  // PATCH parcial: monta o body apenas com os campos presentes no patch,
+  // evitando sobrescrever name/email/attributes com undefined no Authentik.
+  updateUserProfile: async (userPk: AuthentikUserPk, patch: UpdateUserProfileInput) =>
+    request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.email !== undefined ? { email: patch.email } : {}),
+      ...(patch.attributes !== undefined ? { attributes: patch.attributes } : {}),
+    }),
 
   // ── Recovery ─────────────────────────────────────────────────
 
-  requestPasswordReset: (userPk: AuthentikUserPk) =>
-    request<RecoveryLinkResponse>(
-      config,
-      "POST",
-      `/api/v3/core/users/${userPk}/recovery/`,
-      {},
-    ),
+  requestPasswordReset: async (userPk: AuthentikUserPk) =>
+    request<RecoveryLinkResponse>(config, "POST", `/api/v3/core/users/${userPk}/recovery/`, {}),
 
   // ── Groups ───────────────────────────────────────────────────
 
@@ -201,21 +190,13 @@ export const createAuthentikClient = (
     return { ok: true as const, data: first ?? null };
   },
 
-  addUserToGroup: (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<void>(
-      config,
-      "POST",
-      `/api/v3/core/groups/${groupPk}/add_user/`,
-      { pk: userPk },
-    ),
+  addUserToGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
+    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/add_user/`, { pk: userPk }),
 
-  removeUserFromGroup: (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<void>(
-      config,
-      "POST",
-      `/api/v3/core/groups/${groupPk}/remove_user/`,
-      { pk: userPk },
-    ),
+  removeUserFromGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
+    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/remove_user/`, {
+      pk: userPk,
+    }),
 
   listUserGroups: async (userPk: AuthentikUserPk) => {
     type UserWithGroups = UserResponse & {
@@ -232,18 +213,13 @@ export const createAuthentikClient = (
 
   // ── Service Account (M2M) ────────────────────────────────────
 
-  createServiceAccount: (input: CreateServiceAccountInput) =>
-    request<ServiceAccountResponse>(
-      config,
-      "POST",
-      "/api/v3/core/users/service_account/",
-      {
-        name: input.name,
-        create_group: input.create_group ?? false,
-        expiring: input.expiring ?? true,
-        ...(input.expires !== undefined ? { expires: input.expires } : {}),
-      },
-    ),
+  createServiceAccount: async (input: CreateServiceAccountInput) =>
+    request<ServiceAccountResponse>(config, "POST", "/api/v3/core/users/service_account/", {
+      name: input.name,
+      create_group: input.create_group ?? false,
+      expiring: input.expiring ?? true,
+      ...(input.expires !== undefined ? { expires: input.expires } : {}),
+    }),
 });
 
 // ─── Noop client (testes ou IdP desabilitado) ───────────────────
@@ -281,6 +257,14 @@ export const createNoopAuthentikClient = (): AuthentikClient => {
     reactivateUser: async () => ({ ok: true, data: undefined }),
     deleteUser: async () => ({ ok: true, data: undefined }),
     updateUserAttributes: async (pk) => ({ ok: true, data: stubUser({ pk }) }),
+    updateUserProfile: async (pk, patch) => ({
+      ok: true,
+      data: stubUser({
+        pk,
+        name: patch.name ?? "Noop User",
+        email: patch.email ?? "noop@example.invalid",
+      }),
+    }),
     requestPasswordReset: async () => ({
       ok: true,
       data: { link: "https://noop.invalid/recovery/?token=noop" },

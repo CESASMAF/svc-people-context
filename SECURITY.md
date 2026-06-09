@@ -18,7 +18,7 @@ We will acknowledge receipt within 48 hours and provide a timeline for resolutio
 ## Supported Versions
 
 | Version | Supported |
-|---------|-----------|
+| ------- | --------- |
 | 0.1.x   | Yes       |
 
 ## Security Practices

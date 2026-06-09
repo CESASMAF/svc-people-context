@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "ticket": "PEO-LINT-ZERO",
+  "size": "L",
+  "createdAt": "2026-06-09T17:28:39.845Z",
+  "closedAt": "2026-06-09T18:07:52.551Z",
+  "currentWave": null,
+  "status": "closed-green",
+  "waves": [
+    {
+      "id": "W0",
+      "status": "done",
+      "agent": "claude",
+      "startedAt": "2026-06-09T17:30:24.223Z",
+      "finishedAt": "2026-06-09T17:30:24.253Z",
+      "rounds": 0,
+      "reportPath": "W0/REPORT.md",
+      "outcome": "RED"
+    },
+    {
+      "id": "W1",
+      "status": "done",
+      "agent": "claude",
+      "startedAt": "2026-06-09T17:30:24.279Z",
+      "finishedAt": "2026-06-09T18:07:52.414Z",
+      "rounds": 0,
+      "reportPath": "W1/REPORT.md",
+      "outcome": "GREEN"
+    },
+    {
+      "id": "W2",
+      "status": "done",
+      "agent": "claude",
+      "startedAt": "2026-06-09T18:07:52.444Z",
+      "finishedAt": "2026-06-09T18:07:52.470Z",
+      "rounds": 0,
+      "reportPath": "W1/REPORT.md",
+      "outcome": "GREEN"
+    },
+    {
+      "id": "W3",
+      "status": "done",
+      "agent": "claude",
+      "startedAt": "2026-06-09T18:07:52.496Z",
+      "finishedAt": "2026-06-09T18:07:52.523Z",
+      "rounds": 0,
+      "reportPath": "W3/REPORT.md",
+      "outcome": "GREEN"
+    }
+  ],
+  "blockers": [],
+  "lastEvent": "close:green"
+}

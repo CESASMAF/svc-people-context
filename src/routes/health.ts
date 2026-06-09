@@ -1,13 +1,13 @@
 import { Elysia } from "elysia";
-import type { Sql } from "postgres";
+import type { Sql } from "../repository/db.ts";
 import type { OutboxRelay } from "../events/outbox-relay.ts";
 
 const OUTBOX_BACKLOG_THRESHOLD = 1000;
 
-type HealthDeps = {
+interface HealthDeps {
   readonly sql: Sql;
   readonly relay: OutboxRelay;
-};
+}
 
 export const createHealthRoutes = ({ sql, relay }: HealthDeps) =>
   new Elysia()
@@ -31,7 +31,7 @@ export const createHealthRoutes = ({ sql, relay }: HealthDeps) =>
         const [row] = await sql<[{ count: string }]>`
           SELECT count(*)::text AS count FROM outbox_events WHERE published = false
         `;
-        const backlog = Number(row!.count);
+        const backlog = Number(row.count);
         checks.outboxBacklog = String(backlog);
         if (backlog > OUTBOX_BACKLOG_THRESHOLD) {
           checks.outbox = "backlog_high";

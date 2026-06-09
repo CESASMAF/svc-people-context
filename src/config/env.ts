@@ -4,9 +4,43 @@ const isProduction = process.env["NODE_ENV"] === "production";
 
 const requireInProd = (key: string, fallback: string): string => {
   const value = process.env[key];
-  if (value) return value;
+  if (value !== undefined && value !== "") return value;
   if (isProduction) throw new Error(`[env] ${key} is required in production`);
   return fallback;
+};
+
+// ─── OIDC issuer/JWKS — alvo: Authentik self-hosted (deploy BV) ──
+//
+// Os endpoints OIDC do Authentik sao derivados da application:
+//   issuer  = <AUTHENTIK_URL>/application/o/<slug>/
+//   jwks    = <AUTHENTIK_URL>/application/o/<slug>/jwks/
+// (ref-authentik: add-secure-apps/providers/oauth2/index.mdx — "OAuth2 endpoints").
+//
+// Derivamos de AUTHENTIK_URL + AUTHENTIK_APP_SLUG; OIDC_ISSUER / JWKS_URL
+// permitem override explicito (ex: provider num dominio distinto do core).
+const authentikBaseRaw = process.env["AUTHENTIK_URL"];
+const authentikBaseTrimmed = authentikBaseRaw?.replace(/\/+$/, "");
+// String vazia é tratada como "não configurado" (mesma semântica do `||` antigo).
+const authentikBase =
+  authentikBaseTrimmed !== undefined && authentikBaseTrimmed !== ""
+    ? authentikBaseTrimmed
+    : undefined;
+const oidcAppSlug = process.env["AUTHENTIK_APP_SLUG"] ?? "people-context";
+const derivedIssuer =
+  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/` : undefined;
+const derivedJwks =
+  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/jwks/` : undefined;
+
+const resolveOidc = (key: string, derived: string | undefined, devFallback: string): string => {
+  const explicit = process.env[key];
+  if (explicit !== undefined && explicit !== "") return explicit;
+  if (derived !== undefined) return derived;
+  if (isProduction) {
+    throw new Error(
+      `[env] ${key} (ou AUTHENTIK_URL + AUTHENTIK_APP_SLUG) is required in production`,
+    );
+  }
+  return devFallback;
 };
 
 export const env = {
@@ -23,17 +57,38 @@ export const env = {
   },
 
   auth: {
-    jwksUrl: requireInProd("JWKS_URL", "https://auth.acdgbrasil.com.br/oauth/v2/keys"),
-    issuer: requireInProd("ZITADEL_ISSUER", "https://auth.acdgbrasil.com.br"),
-    introspectUrl: process.env["ZITADEL_INTROSPECT_URL"],
-    introspectClientId: process.env["ZITADEL_INTROSPECT_CLIENT_ID"],
-    introspectClientSecret: process.env["ZITADEL_INTROSPECT_CLIENT_SECRET"],
-    allowedServiceAccounts: process.env["ALLOWED_SERVICE_ACCOUNTS"]
-      ?.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean) ?? [],
+    // Authentik OIDC (ADR-027). Migrado de Zitadel — provisionamento e
+    // validacao de token agora apontam para o MESMO IdP (sem split-brain).
+    issuer: resolveOidc(
+      "OIDC_ISSUER",
+      derivedIssuer,
+      "https://auth.acdg-bv.org.br/application/o/people-context/",
+    ),
+    jwksUrl: resolveOidc(
+      "JWKS_URL",
+      derivedJwks,
+      "https://auth.acdg-bv.org.br/application/o/people-context/jwks/",
+    ),
+    // Validacao de audience opcional (claim `aud`). Quando setado, o token
+    // precisa ter sido emitido para este client_id. Hardening recomendado.
+    // Empty string → undefined (audience opcional; "" não é audience válida).
+    audience: process.env["OIDC_AUDIENCE"] !== "" ? process.env["OIDC_AUDIENCE"] : undefined,
+    // Introspection RFC 7662 — fallback para access tokens opacos de service
+    // accounts (Authentik expoe em <issuer>introspect/). Opcional.
+    introspectUrl:
+      process.env["OIDC_INTROSPECT_URL"] ??
+      (derivedIssuer !== undefined ? `${derivedIssuer}introspect/` : undefined),
+    introspectClientId: process.env["OIDC_INTROSPECT_CLIENT_ID"],
+    introspectClientSecret: process.env["OIDC_INTROSPECT_CLIENT_SECRET"],
+    allowedServiceAccounts:
+      process.env["ALLOWED_SERVICE_ACCOUNTS"]
+        ?.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean) ?? [],
     introspectTimeoutMs: Number(process.env["INTROSPECT_TIMEOUT_MS"] ?? 5000),
-    projectId: process.env["ZITADEL_PROJECT_ID"] ?? "",
+    // Claim que carrega os grupos do usuario no token Authentik (array de
+    // nomes). Os grupos sao homonimos a `system:role` (ADR-029) + `superadmin`.
+    rolesClaim: process.env["OIDC_ROLES_CLAIM"] ?? "groups",
   },
 
   nats: {
@@ -53,7 +108,8 @@ export const env = {
 // onde createUser silenciosamente nao chama Authentik por causa de noop client.
 const { baseUrl: authentikUrl, token: authentikToken } = env.authentik;
 const authentikConfigured = authentikUrl !== undefined && authentikToken !== undefined;
-const authentikPartial = !authentikConfigured && (authentikUrl !== undefined || authentikToken !== undefined);
+const authentikPartial =
+  !authentikConfigured && (authentikUrl !== undefined || authentikToken !== undefined);
 
 if (authentikPartial) {
   const missing = authentikUrl === undefined ? "AUTHENTIK_URL" : "AUTHENTIK_TOKEN";

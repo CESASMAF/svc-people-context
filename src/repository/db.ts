@@ -1,13 +1,16 @@
-import postgres from "postgres";
+import { SQL } from "bun";
 import { env } from "../config/env.ts";
 
-export type { Sql } from "postgres";
+// Driver nativo do Bun (`Bun.sql`) — substitui postgres.js (ADR docs/adr/0002).
+// A interface (factory `createXxxRepository(sql)`) NÃO muda: `Sql` é o tipo do cliente.
+export type Sql = SQL;
 
-export const createDb = () =>
-  postgres({
-    host: env.db.host,
+export const createDb = (): SQL =>
+  new SQL({
+    adapter: "postgres",
+    hostname: env.db.host,
     port: env.db.port,
-    user: env.db.user,
+    username: env.db.user,
     password: env.db.password,
     database: env.db.database,
     max: 10,

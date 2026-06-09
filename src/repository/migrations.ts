@@ -1,4 +1,4 @@
-import type { Sql } from "postgres";
+import type { Sql } from "./db.ts";
 
 // ─── Migration registry (ordered, idempotent) ──────────────────
 // Each migration runs inside a transaction. The `schema_migrations`
@@ -6,13 +6,16 @@ import type { Sql } from "postgres";
 
 // postgres.js TransactionSql loses the call signature via Omit,
 // so we use a minimal callable type for migration functions.
-type TaggedSql = (template: TemplateStringsArray, ...params: readonly unknown[]) => Promise<unknown[]>;
+type TaggedSql = (
+  template: TemplateStringsArray,
+  ...params: readonly unknown[]
+) => Promise<unknown[]>;
 
-type Migration = {
+interface Migration {
   readonly version: number;
   readonly name: string;
   readonly up: (sql: TaggedSql) => Promise<void>;
-};
+}
 
 const migrations: readonly Migration[] = [
   {
@@ -121,7 +124,7 @@ export const migrate = async (sql: Sql): Promise<void> => {
     )
   `;
 
-  const applied = await sql<Array<{ version: number }>>`
+  const applied = await sql<{ version: number }[]>`
     SELECT version FROM schema_migrations ORDER BY version
   `;
   const appliedVersions = new Set(applied.map((r) => r.version));

@@ -26,9 +26,7 @@ const createPerson = async (
   app: ReturnType<typeof setup>["app"],
   body: Record<string, unknown> = { fullName: "Ana Costa", birthDate: "1990-05-15" },
 ): Promise<string> => {
-  const res = await app.handle(
-    new Request("http://localhost/api/v1/people", json(body)),
-  );
+  const res = await app.handle(new Request("http://localhost/api/v1/people", json(body)));
   return dataAs<IdData>(await parseJson(res)).id;
 };
 
@@ -42,13 +40,16 @@ describe("POST /api/v1/people — createLogin path", () => {
     });
 
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people", json({
-        fullName: "Joao Silva",
-        birthDate: "1990-05-15",
-        email: "joao@example.com",
-        createLogin: true,
-        initialPassword: "Secret123!",
-      })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({
+          fullName: "Joao Silva",
+          birthDate: "1990-05-15",
+          email: "joao@example.com",
+          createLogin: true,
+          initialPassword: "Secret123!",
+        }),
+      ),
     );
 
     expect(res.status).toBe(201);
@@ -65,23 +66,27 @@ describe("POST /api/v1/people — createLogin path", () => {
     expect(events).toContain("people.user.provisioned");
   });
 
-  it("retorna 207 com warning quando IdP createUser falha", async () => {
+  it("retorna 207 com warning quando IdP createUser falha (erro nao-retentavel)", async () => {
     const { app, idp } = setup({
-      createUserFails: { code: 409, message: "username conflict" },
+      createUserFails: { code: 500, message: "idp error" },
     });
 
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people", json({
-        fullName: "Joao Silva",
-        birthDate: "1990-05-15",
-        email: "joao@example.com",
-        createLogin: true,
-      })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({
+          fullName: "Joao Silva",
+          birthDate: "1990-05-15",
+          email: "joao@example.com",
+          createLogin: true,
+        }),
+      ),
     );
 
     expect(res.status).toBe(207);
-    const body = await parseJson(res) as { warnings?: Array<{ code: string }> };
+    const body = (await parseJson(res)) as { warnings?: { code: string }[] };
     expect(body.warnings?.[0]?.code).toBe("IDP-001");
+    // 500 nao e retentavel — uma unica tentativa de createUser.
     expect(idp.calls.createUser.length).toBe(1);
   });
 });
@@ -126,7 +131,10 @@ describe("PUT /api/v1/people/:personId/deactivate", () => {
   it("retorna 404 quando pessoa nao existe", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/deactivate", { method: "PUT" }),
+      new Request(
+        "http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/deactivate",
+        { method: "PUT" },
+      ),
     );
     expect(res.status).toBe(404);
   });
@@ -153,7 +161,7 @@ describe("PUT /api/v1/people/:personId/deactivate", () => {
     );
 
     expect(res.status).toBe(502);
-    const body = await parseJson(res) as unknown as { error: { code: string; message: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string; message: string } };
     expect(body.error.code).toBe("IDP-002");
     // AppSec HIGH-7: nao vazar message do Authentik
     expect(body.error.message).not.toContain("idp down");
@@ -218,7 +226,10 @@ describe("PUT /api/v1/people/:personId/reactivate", () => {
   it("retorna 404 quando pessoa nao existe", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/reactivate", { method: "PUT" }),
+      new Request(
+        "http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/reactivate",
+        { method: "PUT" },
+      ),
     );
     expect(res.status).toBe(404);
   });
@@ -242,7 +253,7 @@ describe("PUT /api/v1/people/:personId/reactivate", () => {
     );
 
     expect(res.status).toBe(502);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("IDP-003");
   });
 
@@ -290,7 +301,9 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
     expect((body as unknown as { data?: unknown }).data).toBeUndefined();
     expect(idp.calls.requestPasswordReset).toEqual([70]);
 
-    const event = publisher.published.find((p) => p.subject === "people.user.password_reset_requested");
+    const event = publisher.published.find(
+      (p) => p.subject === "people.user.password_reset_requested",
+    );
     expect(event).toBeDefined();
     const eventData = (event!.payload as { data: { recoveryLink: string } }).data;
     expect(eventData.recoveryLink).toContain("recovery?token=abc");
@@ -299,7 +312,9 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
   it("retorna 400 quando personId nao e UUID", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/not-a-uuid/request-password-reset", { method: "POST" }),
+      new Request("http://localhost/api/v1/people/not-a-uuid/request-password-reset", {
+        method: "POST",
+      }),
     );
     expect(res.status).toBe(400);
   });
@@ -307,7 +322,10 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
   it("retorna 404 quando pessoa nao existe", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/request-password-reset", { method: "POST" }),
+      new Request(
+        "http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/request-password-reset",
+        { method: "POST" },
+      ),
     );
     expect(res.status).toBe(404);
   });
@@ -316,10 +334,12 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/request-password-reset`, { method: "POST" }),
+      new Request(`http://localhost/api/v1/people/${personId}/request-password-reset`, {
+        method: "POST",
+      }),
     );
     expect(res.status).toBe(422);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("PEO-007");
   });
 
@@ -336,10 +356,11 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
     );
 
     expect(res.status).toBe(502);
-    const body = await parseJson(res) as unknown as { error: { code: string; message: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string; message: string } };
     expect(body.error.code).toBe("IDP-004");
     expect(body.error.message).not.toContain("idp down");
-    expect(publisher.published.find((p) => p.subject === "people.user.password_reset_requested"))
-      .toBeUndefined();
+    expect(
+      publisher.published.find((p) => p.subject === "people.user.password_reset_requested"),
+    ).toBeUndefined();
   });
 });

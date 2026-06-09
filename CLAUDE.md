@@ -23,11 +23,12 @@ docker compose up --build
 
 ## Stack
 
-- **Runtime**: Bun 1.3.11
+- **Runtime**: Bun 1.3.14
+- **Language**: TypeScript 6.0 (`types: ["bun"]` — ver `docs/adr/0001`)
 - **HTTP**: Elysia 1.4.28
 - **Database**: PostgreSQL 15 (dedicated, database-per-service)
 - **Events**: NATS JetStream via nats.js 2.29.3
-- **Auth**: JWT validation via Zitadel JWKS
+- **Auth**: JWT validation via Authentik OIDC JWKS (RS256). Roles via claim `groups` (homônimos a `system:role`). Migrado de Zitadel.
 
 ## TypeScript Guidelines
 
@@ -70,8 +71,12 @@ interface PersonRepository {
 }
 
 const createPersonRepository = (sql: Sql): PersonRepository => ({
-  findById: async (id) => { /* ... */ },
-  create: async (input) => { /* ... */ },
+  findById: async (id) => {
+    /* ... */
+  },
+  create: async (input) => {
+    /* ... */
+  },
 });
 ```
 
@@ -79,7 +84,9 @@ const createPersonRepository = (sql: Sql): PersonRepository => ({
 // WRONG — class-based
 class PersonRepository {
   constructor(private sql: Sql) {}
-  async findById(id: string) { /* ... */ }
+  async findById(id: string) {
+    /* ... */
+  }
 }
 ```
 
@@ -100,11 +107,11 @@ src/
 
 ## Security (Private Cloud Directives)
 
-- **JWT validation**: Verify RS256 signature against Zitadel JWKS at `https://auth.acdgbrasil.com.br/oauth/v2/keys`
-- **RBAC**: Role claims from JWT (`urn:zitadel:iam:org:project:roles`). Guard mutation endpoints.
+- **JWT validation**: Verify RS256 signature against Authentik OIDC JWKS. Issuer/JWKS derived from `AUTHENTIK_URL` + `AUTHENTIK_APP_SLUG` (`<url>/application/o/<slug>/` and `.../jwks/`), with `OIDC_ISSUER`/`JWKS_URL` overrides. Optional `aud` check via `OIDC_AUDIENCE`.
+- **RBAC**: Role claims from JWT `groups` claim (array of group names, homônimos a `system:role` + `superadmin`; configurable via `OIDC_ROLES_CLAIM`). Guard mutation endpoints.
 - **X-Actor-Id**: Required header on all mutation endpoints (POST, PUT, DELETE).
 - **Secrets**: NEVER hardcoded. Environment variables only, sourced from Bitwarden Secrets Manager in production.
-- **SQL injection**: Always use parameterized queries via `postgres.js` tagged templates.
+- **SQL injection**: Always use parameterized queries via `Bun.sql` tagged templates (native driver; see `docs/adr/0002`).
 - **Health endpoints**: `/health` and `/ready` have NO auth (`security: []`).
 
 ## Database
@@ -112,7 +119,7 @@ src/
 - **Dedicated PostgreSQL**: `people` database, separate from all other services.
 - **Naming**: Tables lowercase with underscores (`people`, `system_roles`).
 - **Migrations**: Versioned, sequential migrations in `repository/migrations.ts`. Tracked in `schema_migrations` table. Each migration runs in a transaction.
-- **Connection pool**: Max 10 connections via `postgres.js`.
+- **Connection pool**: Max 10 connections via `Bun.sql` (native Postgres driver).
 
 ## Conventions
 
@@ -126,6 +133,7 @@ src/
 ## Contracts
 
 API contracts defined in `contracts/services/people/` (separate repo):
+
 - OpenAPI 3.1: 12 endpoints (Person 5, Roles 5, Health 2)
 - AsyncAPI 3.1: 5 NATS events
 - 19 canonical YAML schemas
@@ -138,18 +146,50 @@ API contracts defined in `contracts/services/people/` (separate repo):
 - Pattern: pure functions → easy to test without mocks
 - Coverage gate script: `scripts/check-coverage.js`
 
+## Quality gates (ESLint + Prettier + types + tests)
+
+Controle de qualidade portado do `core-api`. Os 5 checks nascem **verdes**:
+
+```bash
+bun run verify   # typecheck && format:check && lint && test && coverage (≥95%)
+```
+
+- **ESLint flat** (`eslint.config.js`, `typescript-eslint` strict+stylistic type-checked).
+  Invariantes duras são `error` (no-class, no-any, no-throw em domain/application via
+  `no-restricted-syntax`, libs proibidas); dívida de adoção é `warn` rastreável
+  (`strict-boolean-expressions` etc.) — cada ticket zera os warns do arquivo que toca.
+- **Prettier** (`.prettierrc.json`): printWidth 100, **double-quote** (estilo do repo), semi.
+- Overrides por camada: `domain/application` proíbem `throw`; adapters e `routes` relaxam
+  `require-await`/readonly; `tests` relaxa fakes.
+
+## Pipeline SDD — `people-context-sdd` (máximo rigor)
+
+Pipeline spec-driven (RED→YELLOW→GREEN, 17 fases) portado do `core-api-sdd`, em
+`.specify/`. Use para features não-triviais. **Guia completo: `.specify/README.md`**;
+protocolo de gate (texto puro, nunca `AskUserQuestion`): `.specify/.smoke-test/RUNBOOK.md`;
+princípios I–X: `.specify/memory/constitution.md`.
+
+- **Orquestração in-session** (não headless): o `people-orchestrator` percorre o
+  `.specify/workflows/people-context-sdd/workflow.yml`; `command: speckit.*` → skill
+  `/speckit-*`; `type: gate` → texto puro + `approve`/`reject`; citação → `skills_*`.
+- **Máquina fail-first W0→W3**: `bun run pipeline:state init <T> --size <S|M|L>` →
+  `wave-start/finish/round` → `close`; dashboard `bun run pipeline:status`. Tickets em
+  `.pipeline/<TICKET>/STATE.json` (histórico auditável — não deletar).
+- **Gate W3 = `/speckit-verify`** (= `bun run verify`). Decisões-chave exigem citação
+  canônica ≥4 linhas via `skills_citar` (MCP `acdg-skills`).
+
 ## Reference Network — consulta fria (especialistas externos)
 
 Para FATOS de documentação de tecnologias (sintaxe, versão exata, comportamento), não responda de memória nem chute: consulte o especialista **EXTERNO read-only**, que cita a doc oficial offline (`infra/reference/`) ou recusa. Divisão: você (interno) conhece o código e **decide**; ele (externo) só entrega o **fato citado** — nunca vê seu código.
 
 Invocação: delegue isolado via `subagent_type: "acdg-ref:ref-<tech>"`, ou direto `/acdg-ref:ref-<tech> <pergunta>`.
 
-| Dúvida sobre… | Consulte |
-|---|---|
-| Elysia: handler, validação (TypeBox/`t`), lifecycle, plugin, Eden | `ref-elysia` |
-| SQL, tipos, funções, GUCs, índices (PostgreSQL) | `ref-postgresql` |
-| NATS/JetStream: subjects, consumers, ack, Outbox | `ref-nats` |
-| Authentik: OIDC/OAuth2 provider, claims/scopes | `ref-authentik` |
+| Dúvida sobre…                                                     | Consulte         |
+| ----------------------------------------------------------------- | ---------------- |
+| Elysia: handler, validação (TypeBox/`t`), lifecycle, plugin, Eden | `ref-elysia`     |
+| SQL, tipos, funções, GUCs, índices (PostgreSQL)                   | `ref-postgresql` |
+| NATS/JetStream: subjects, consumers, ack, Outbox                  | `ref-nats`       |
+| Authentik: OIDC/OAuth2 provider, claims/scopes                    | `ref-authentik`  |
 
 Ainda **fora da rede** (P2): `jose` (JWT) e Bun runtime.
 

@@ -26,7 +26,10 @@ describe("POST /api/v1/people", () => {
   it("registers a person and returns 201 with id", async () => {
     const { app, publisher } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", birthDate: "1990-05-15" }),
+      ),
     );
     expect(res.status).toBe(201);
     const body = await parseJson(res);
@@ -42,13 +45,19 @@ describe("POST /api/v1/people", () => {
   it("returns existing person on CPF dedup (no event published)", async () => {
     const { app, publisher } = setup();
     const first = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", cpf: "52998224725", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", cpf: "52998224725", birthDate: "1990-05-15" }),
+      ),
     );
     const firstBody = await parseJson(first);
     expect(publisher.published.length).toBe(1);
 
     const second = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana C.", cpf: "52998224725", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana C.", cpf: "52998224725", birthDate: "1990-05-15" }),
+      ),
     );
     expect(second.status).toBe(201);
     const secondBody = await parseJson(second);
@@ -60,7 +69,10 @@ describe("POST /api/v1/people", () => {
   it("returns 422 for empty fullName (schema validation)", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "", birthDate: "1990-05-15" }),
+      ),
     );
     expect(res.status).toBe(422);
   });
@@ -68,7 +80,10 @@ describe("POST /api/v1/people", () => {
   it("returns 422 for invalid cpf format (schema validation)", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana", cpf: "123", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana", cpf: "123", birthDate: "1990-05-15" }),
+      ),
     );
     expect(res.status).toBe(422);
   });
@@ -114,7 +129,10 @@ describe("GET /api/v1/people/:personId", () => {
   it("returns 200 with person data", async () => {
     const { app } = setup();
     const createRes = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", birthDate: "1990-05-15" }),
+      ),
     );
     const { id } = dataAs<IdData>(await parseJson(createRes));
 
@@ -127,7 +145,9 @@ describe("GET /api/v1/people/:personId", () => {
 
   it("returns 404 for unknown id", async () => {
     const { app } = setup();
-    const res = await app.handle(new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000"));
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000"),
+    );
     expect(res.status).toBe(404);
   });
 });
@@ -136,7 +156,10 @@ describe("GET /api/v1/people/by-cpf/:cpf", () => {
   it("returns 200 when cpf exists", async () => {
     const { app } = setup();
     await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", cpf: "52998224725", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", cpf: "52998224725", birthDate: "1990-05-15" }),
+      ),
     );
 
     const res = await app.handle(new Request("http://localhost/api/v1/people/by-cpf/52998224725"));
@@ -156,7 +179,10 @@ describe("PUT /api/v1/people/:personId", () => {
   it("returns 204 on successful update and publishes personUpdated event", async () => {
     const { app, publisher } = setup();
     const createRes = await app.handle(
-      new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-05-15" })),
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", birthDate: "1990-05-15" }),
+      ),
     );
     const { id } = dataAs<IdData>(await parseJson(createRes));
     publisher.published.length = 0; // reset after create event
@@ -192,8 +218,18 @@ describe("PUT /api/v1/people/:personId", () => {
 describe("GET /api/v1/people", () => {
   it("returns paginated list", async () => {
     const { app } = setup();
-    await app.handle(new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-01-01" })));
-    await app.handle(new Request("http://localhost/api/v1/people", json({ fullName: "João Silva", birthDate: "1985-06-20" })));
+    await app.handle(
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", birthDate: "1990-01-01" }),
+      ),
+    );
+    await app.handle(
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "João Silva", birthDate: "1985-06-20" }),
+      ),
+    );
 
     const res = await app.handle(new Request("http://localhost/api/v1/people"));
     expect(res.status).toBe(200);
@@ -205,8 +241,18 @@ describe("GET /api/v1/people", () => {
 
   it("filters by search", async () => {
     const { app } = setup();
-    await app.handle(new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-01-01" })));
-    await app.handle(new Request("http://localhost/api/v1/people", json({ fullName: "João Silva", birthDate: "1985-06-20" })));
+    await app.handle(
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "Ana Costa", birthDate: "1990-01-01" }),
+      ),
+    );
+    await app.handle(
+      new Request(
+        "http://localhost/api/v1/people",
+        json({ fullName: "João Silva", birthDate: "1985-06-20" }),
+      ),
+    );
 
     const res = await app.handle(new Request("http://localhost/api/v1/people?search=ana"));
     expect(res.status).toBe(200);

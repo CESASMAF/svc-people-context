@@ -3,33 +3,30 @@ import { env } from "../config/env.ts";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type ZitadelRoles = Record<string, Record<string, string>>;
-
-export type AuthContext = {
+export interface AuthContext {
   readonly sub: string;
   readonly roles: readonly string[];
-};
+}
 
 export type JwtVerifier = (token: string) => Promise<AuthContext | null>;
 
-// ─── Role claim extraction ──────────────────────────────────────
+// ─── Role claim extraction (Authentik) ─────────────────────────
+//
+// No Authentik os papeis sao modelados como GRUPOS homonimos a `system:role`
+// (ADR-029) mais `superadmin`, e chegam no token como array de nomes na claim
+// `groups` (ref-authentik: providers/oauth2 "Default & special scopes" — o scope
+// `profile` inclui group membership; k8s usa `oidc-groups-claim: groups`).
+// O nome da claim e configuravel via OIDC_ROLES_CLAIM.
+const ROLES_CLAIM = env.auth.rolesClaim;
 
-const ROLE_CLAIM = env.auth.projectId
-  ? `urn:zitadel:iam:org:project:${env.auth.projectId}:roles`
-  : "urn:zitadel:iam:org:project:roles";
-
-const ROLE_CLAIM_PATTERN = /^urn:zitadel:iam:org:project:(?:\d+:)?roles$/;
-
-const extractRoles = (payload: JWTPayload): readonly string[] => {
-  // Try exact key first, then pattern match as fallback
-  const claimKey = (ROLE_CLAIM in payload)
-    ? ROLE_CLAIM
-    : Object.keys(payload).find((k) => ROLE_CLAIM_PATTERN.test(k));
-  if (!claimKey) return [];
-  const rolesObj = payload[claimKey] as ZitadelRoles | undefined;
-  if (!rolesObj || typeof rolesObj !== "object") return [];
-  return Object.keys(rolesObj);
+// Aceita array de strings (formato Authentik). Filtra nao-strings defensivamente.
+const extractRolesFrom = (source: Readonly<Record<string, unknown>>): readonly string[] => {
+  const claim = source[ROLES_CLAIM];
+  if (!Array.isArray(claim)) return [];
+  return claim.filter((g): g is string => typeof g === "string");
 };
+
+const extractRoles = (payload: JWTPayload): readonly string[] => extractRolesFrom(payload);
 
 // ─── Token introspection (RFC 7662) — fallback for service accounts ─
 
@@ -37,29 +34,31 @@ type IntrospectionResponse = Readonly<Record<string, unknown>> & {
   readonly active: boolean;
 };
 
-const extractIntrospectionRoles = (result: IntrospectionResponse): readonly string[] => {
-  const claimKey = (ROLE_CLAIM in result)
-    ? ROLE_CLAIM
-    : Object.keys(result).find((k) => ROLE_CLAIM_PATTERN.test(k));
-  if (!claimKey) return [];
-  const rolesObj = result[claimKey] as ZitadelRoles | undefined;
-  if (!rolesObj || typeof rolesObj !== "object") return [];
-  return Object.keys(rolesObj);
-};
+const extractIntrospectionRoles = (result: IntrospectionResponse): readonly string[] =>
+  extractRolesFrom(result);
 
 const introspectToken = async (token: string): Promise<readonly string[] | null> => {
-  const { introspectUrl, introspectClientId, introspectClientSecret, introspectTimeoutMs } = env.auth;
-  if (!introspectUrl || !introspectClientId || !introspectClientSecret) return null;
+  const { introspectUrl, introspectClientId, introspectClientSecret, introspectTimeoutMs } =
+    env.auth;
+  // Introspection só roda com os três configurados; "" ausente → request falha → null.
+  if (
+    introspectUrl === undefined ||
+    introspectClientId === undefined ||
+    introspectClientSecret === undefined
+  )
+    return null;
 
   const credentials = btoa(`${introspectClientId}:${introspectClientSecret}`);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), introspectTimeoutMs);
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, introspectTimeoutMs);
 
   try {
     const response = await fetch(introspectUrl, {
       method: "POST",
       headers: {
-        "Authorization": `Basic ${credentials}`,
+        Authorization: `Basic ${credentials}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: `token=${encodeURIComponent(token)}`,
@@ -71,7 +70,7 @@ const introspectToken = async (token: string): Promise<readonly string[] | null>
       return null;
     }
 
-    const result = await response.json() as IntrospectionResponse;
+    const result = (await response.json()) as IntrospectionResponse;
     if (!result.active) return null;
 
     return extractIntrospectionRoles(result);
@@ -97,8 +96,8 @@ export const validateJwks = async (): Promise<void> => {
     if (!response.ok) {
       throw new Error(`JWKS endpoint returned HTTP ${response.status}`);
     }
-    const body = await response.json() as { keys?: unknown[] };
-    if (!body.keys || !Array.isArray(body.keys) || body.keys.length === 0) {
+    const body = (await response.json()) as { keys?: unknown[] };
+    if (!Array.isArray(body.keys) || body.keys.length === 0) {
       throw new Error("JWKS response contains no keys");
     }
     console.log(`[jwt] JWKS validated: ${body.keys.length} key(s) from ${env.auth.jwksUrl}`);
@@ -121,16 +120,17 @@ export const createJwtVerifier = (): JwtVerifier => {
     try {
       const { payload } = await jwtVerify(token, jwks, {
         issuer: env.auth.issuer,
+        ...(env.auth.audience !== undefined ? { audience: env.auth.audience } : {}),
       });
 
       const sub = payload.sub;
-      if (!sub) return null;
+      if (sub === undefined || sub === "") return null;
 
       let roles = extractRoles(payload);
 
       if (roles.length === 0 && allowedServiceAccounts.has(sub)) {
         const introspectedRoles = await introspectToken(token);
-        if (introspectedRoles) {
+        if (introspectedRoles !== null) {
           roles = introspectedRoles;
         }
       }
