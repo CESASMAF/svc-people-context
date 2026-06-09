@@ -111,7 +111,7 @@ src/
 - **RBAC**: Role claims from JWT `groups` claim (array of group names, homônimos a `system:role` + `superadmin`; configurable via `OIDC_ROLES_CLAIM`). Guard mutation endpoints.
 - **X-Actor-Id**: Required header on all mutation endpoints (POST, PUT, DELETE).
 - **Secrets**: NEVER hardcoded. Environment variables only, sourced from Bitwarden Secrets Manager in production.
-- **SQL injection**: Always use parameterized queries via `postgres.js` tagged templates.
+- **SQL injection**: Always use parameterized queries via `Bun.sql` tagged templates (native driver; see `docs/adr/0002`).
 - **Health endpoints**: `/health` and `/ready` have NO auth (`security: []`).
 
 ## Database
@@ -119,7 +119,7 @@ src/
 - **Dedicated PostgreSQL**: `people` database, separate from all other services.
 - **Naming**: Tables lowercase with underscores (`people`, `system_roles`).
 - **Migrations**: Versioned, sequential migrations in `repository/migrations.ts`. Tracked in `schema_migrations` table. Each migration runs in a transaction.
-- **Connection pool**: Max 10 connections via `postgres.js`.
+- **Connection pool**: Max 10 connections via `Bun.sql` (native Postgres driver).
 
 ## Conventions
 

@@ -9,7 +9,7 @@ const createFakeSql = (shouldFail = false) => {
   const handler = ((_strings: TemplateStringsArray, ..._params: unknown[]) => {
     if (shouldFail) throw new Error("connection refused");
     return Promise.resolve([{ "?column?": 1, count: "0" }]);
-  }) as unknown as import("postgres").Sql;
+  }) as unknown as import("../../src/repository/db.ts").Sql;
   return handler;
 };
 

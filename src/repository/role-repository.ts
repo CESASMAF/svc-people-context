@@ -1,4 +1,4 @@
-import type { Sql } from "postgres";
+import type { Sql } from "./db.ts";
 import type { SystemRole, AssignRoleInput } from "../domain/index.ts";
 
 interface PersonSummary {
@@ -30,96 +30,98 @@ export interface RoleRepository {
   ) => Promise<readonly RoleQueryResult[]>;
 }
 
-const SELECT_ROLE = `id, person_id AS "personId", system, role, active, assigned_at::text AS "assignedAt"`;
+export const createRoleRepository = (sql: Sql): RoleRepository => {
+  // Lista de colunas como fragmento Bun.sql (composável e seguro — sem `unsafe`).
+  const roleFields = sql`id, person_id AS "personId", system, role, active, assigned_at::text AS "assignedAt"`;
 
-export const createRoleRepository = (sql: Sql): RoleRepository => ({
-  assign: async (personId, input) => {
-    // Wrap in transaction to prevent race condition on UNIQUE(person_id, system, role)
-    return sql.begin(async (_tx) => {
-      // TransactionSql loses call signature via Omit — cast to Sql for tagged templates
-      const tx = _tx as unknown as Sql;
+  return {
+    assign: async (personId, input) => {
+      // Wrap in transaction to prevent race condition on UNIQUE(person_id, system, role)
+      return sql.begin(async (_tx) => {
+        // TransactionSql loses call signature via Omit — cast to Sql for tagged templates
+        const tx = _tx as unknown as Sql;
 
-      const [existing] = await tx<SystemRole[]>`
-        SELECT ${sql.unsafe(SELECT_ROLE)} FROM system_roles
+        const [existing] = await tx<SystemRole[]>`
+        SELECT ${roleFields} FROM system_roles
         WHERE person_id = ${personId} AND system = ${input.system} AND role = ${input.role}
         FOR UPDATE
       `;
 
-      if (existing !== undefined) {
-        if (existing.active) return { role: existing, created: false };
-        // Tupla [SystemRole]: UPDATE ... RETURNING por id devolve exatamente 1 linha.
-        const [reactivated] = await tx<[SystemRole]>`
+        if (existing !== undefined) {
+          if (existing.active) return { role: existing, created: false };
+          // Tupla [SystemRole]: UPDATE ... RETURNING por id devolve exatamente 1 linha.
+          const [reactivated] = await tx<[SystemRole]>`
           UPDATE system_roles SET active = true WHERE id = ${existing.id}
-          RETURNING ${sql.unsafe(SELECT_ROLE)}
+          RETURNING ${roleFields}
         `;
-        return { role: reactivated, created: true };
-      }
+          return { role: reactivated, created: true };
+        }
 
-      // Tupla [SystemRole]: INSERT ... RETURNING devolve exatamente 1 linha.
-      const [row] = await tx<[SystemRole]>`
+        // Tupla [SystemRole]: INSERT ... RETURNING devolve exatamente 1 linha.
+        const [row] = await tx<[SystemRole]>`
         INSERT INTO system_roles (person_id, system, role)
         VALUES (${personId}, ${input.system}, ${input.role})
-        RETURNING ${sql.unsafe(SELECT_ROLE)}
+        RETURNING ${roleFields}
       `;
-      return { role: row, created: true };
-    });
-  },
+        return { role: row, created: true };
+      });
+    },
 
-  findById: async (personId, roleId) => {
-    const [row] = await sql<SystemRole[]>`
-      SELECT ${sql.unsafe(SELECT_ROLE)} FROM system_roles
+    findById: async (personId, roleId) => {
+      const [row] = await sql<SystemRole[]>`
+      SELECT ${roleFields} FROM system_roles
       WHERE id = ${roleId} AND person_id = ${personId}
     `;
-    return row ?? null;
-  },
+      return row ?? null;
+    },
 
-  listByPerson: async (personId, active) => {
-    if (active !== undefined) {
-      return sql<SystemRole[]>`
-        SELECT ${sql.unsafe(SELECT_ROLE)} FROM system_roles
+    listByPerson: async (personId, active) => {
+      if (active !== undefined) {
+        return sql<SystemRole[]>`
+        SELECT ${roleFields} FROM system_roles
         WHERE person_id = ${personId} AND active = ${active}
         ORDER BY assigned_at
       `;
-    }
-    return sql<SystemRole[]>`
-      SELECT ${sql.unsafe(SELECT_ROLE)} FROM system_roles
+      }
+      return sql<SystemRole[]>`
+      SELECT ${roleFields} FROM system_roles
       WHERE person_id = ${personId}
       ORDER BY assigned_at
     `;
-  },
+    },
 
-  deactivate: async (personId, roleId) => {
-    const [row] = await sql<SystemRole[]>`
+    deactivate: async (personId, roleId) => {
+      const [row] = await sql<SystemRole[]>`
       UPDATE system_roles SET active = false
       WHERE id = ${roleId} AND person_id = ${personId} AND active = true
-      RETURNING ${sql.unsafe(SELECT_ROLE)}
+      RETURNING ${roleFields}
     `;
-    return row ?? null;
-  },
+      return row ?? null;
+    },
 
-  reactivate: async (personId, roleId) => {
-    const [row] = await sql<SystemRole[]>`
+    reactivate: async (personId, roleId) => {
+      const [row] = await sql<SystemRole[]>`
       UPDATE system_roles SET active = true
       WHERE id = ${roleId} AND person_id = ${personId} AND active = false
-      RETURNING ${sql.unsafe(SELECT_ROLE)}
+      RETURNING ${roleFields}
     `;
-    return row ?? null;
-  },
+      return row ?? null;
+    },
 
-  query: async (system, role, active = true) => {
-    const rows = await sql<
-      {
-        personId: string;
-        fullName: string;
-        cpf: string | null;
-        birthDate: string;
-        roleId: string;
-        system: string;
-        role: string;
-        active: boolean;
-        assignedAt: string;
-      }[]
-    >`
+    query: async (system, role, active = true) => {
+      const rows = await sql<
+        {
+          personId: string;
+          fullName: string;
+          cpf: string | null;
+          birthDate: string;
+          roleId: string;
+          system: string;
+          role: string;
+          active: boolean;
+          assignedAt: string;
+        }[]
+      >`
       SELECT
         p.id AS "personId", p.full_name AS "fullName", p.cpf, p.birth_date::text AS "birthDate",
         sr.id AS "roleId", sr.system, sr.role, sr.active, sr.assigned_at::text AS "assignedAt"
@@ -130,16 +132,17 @@ export const createRoleRepository = (sql: Sql): RoleRepository => ({
       ORDER BY p.full_name
     `;
 
-    return rows.map((r) => ({
-      person: { id: r.personId, fullName: r.fullName, cpf: r.cpf, birthDate: r.birthDate },
-      role: {
-        id: r.roleId,
-        personId: r.personId,
-        system: r.system,
-        role: r.role,
-        active: r.active,
-        assignedAt: r.assignedAt,
-      },
-    }));
-  },
-});
+      return rows.map((r) => ({
+        person: { id: r.personId, fullName: r.fullName, cpf: r.cpf, birthDate: r.birthDate },
+        role: {
+          id: r.roleId,
+          personId: r.personId,
+          system: r.system,
+          role: r.role,
+          active: r.active,
+          assignedAt: r.assignedAt,
+        },
+      }));
+    },
+  };
+};

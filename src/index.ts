@@ -58,7 +58,7 @@ const shutdown = async (signal: string): Promise<void> => {
   console.log(`[shutdown] ${signal} received — draining...`);
   await relay.stop();
   await app.stop();
-  await sql.end({ timeout: 5 });
+  await sql.close({ timeout: 5 });
   console.log("[shutdown] Clean exit");
   process.exit(0);
 };

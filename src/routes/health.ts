@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import type { Sql } from "postgres";
+import type { Sql } from "../repository/db.ts";
 import type { OutboxRelay } from "../events/outbox-relay.ts";
 
 const OUTBOX_BACKLOG_THRESHOLD = 1000;

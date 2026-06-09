@@ -1,4 +1,4 @@
-import type { Sql } from "postgres";
+import type { Sql } from "./db.ts";
 
 // ─── Migration registry (ordered, idempotent) ──────────────────
 // Each migration runs inside a transaction. The `schema_migrations`

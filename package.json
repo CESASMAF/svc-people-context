@@ -36,7 +36,6 @@
   "dependencies": {
     "elysia": "1.4.28",
     "jose": "6.2.3",
-    "nats": "2.29.3",
-    "postgres": "3.4.9"
+    "nats": "2.29.3"
   }
 }

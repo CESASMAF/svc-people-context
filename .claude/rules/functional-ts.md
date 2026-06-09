@@ -48,7 +48,7 @@ type IsoDateString = string & { readonly [Brand]: unique symbol }
 ```
 domain/        ← branded types, VOs, validação, Result (ZERO deps externas)
 application/   ← orquestração pura (idp-sync): domain + ports; sem I/O direto
-repository/    ← postgres.js (factory DI), migrations, SQL parametrizado
+repository/    ← Bun.sql nativo (factory DI), migrations, SQL parametrizado
 events/        ← Outbox publisher + relay (NATS)
 idp/           ← Authentik Management API client (Result-based)
 middleware/    ← jwt (jose) + AuthGuard (puro)

@@ -1,5 +1,5 @@
 import { connect, Events, type NatsConnection, StringCodec } from "nats";
-import type { Sql } from "postgres";
+import type { Sql } from "../repository/db.ts";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ export const createOutboxRelay = async (sql: Sql, natsUrl: string): Promise<Outb
         await sql`
           UPDATE outbox_events
           SET published = true, published_at = now()
-          WHERE id = ANY(${publishedIds})
+          WHERE id = ANY(${sql.array(publishedIds)})
         `;
         console.log(`[outbox-relay] Published ${publishedIds.length}/${rows.length} event(s)`);
       }

@@ -1,4 +1,4 @@
-import type { JSONValue, Sql } from "postgres";
+import type { Sql } from "../repository/db.ts";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export const createOutboxPublisher = (sql: Sql): EventPublisher => ({
   publish: async (event) => {
     await sql`
       INSERT INTO outbox_events (subject, payload)
-      VALUES (${event.subject}, ${sql.json(event.payload as unknown as JSONValue)})
+      VALUES (${event.subject}, ${JSON.stringify(event.payload)}::jsonb)
     `;
   },
   close: async () => {

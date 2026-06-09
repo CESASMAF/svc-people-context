@@ -3,8 +3,9 @@
 Invariantes de segurança/privacidade. Violar isto é bug crítico. Fonte: CLAUDE.md, ADRs, findings de AppSec.
 
 ## SQL
-- **100% parametrizado** via `postgres.js` tagged templates: `sql\`... ${value} ...\``. NUNCA interpolar string em SQL.
-- Nomes de coluna dinâmicos só via `sql.unsafe(WHITELIST)` com lista fixa validada manualmente.
+- **100% parametrizado** via `Bun.sql` tagged templates: `sql\`... ${value} ...\``. NUNCA interpolar string em SQL.
+- Listas de coluna estáticas via **fragmento `Bun.sql`** (`const fields = sql\`col AS "alias", ...\``),
+  não via `sql.unsafe`. O driver é o **nativo do Bun** (migrado de postgres.js — ver `docs/adr/0002`).
 
 ## LGPD — minimização de PII
 - **CPF NUNCA entra em payload de evento NATS** (AppSec HIGH-8). Eventos de pessoa carregam só `fullName`/`birthDate`/ids — nunca `cpf`.
