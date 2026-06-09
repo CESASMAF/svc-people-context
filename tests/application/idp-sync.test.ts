@@ -2,7 +2,9 @@ import { describe, it, expect } from "bun:test";
 import {
   findGroupByRoleKey,
   provisionUserInIdp,
+  resolveUniqueUsername,
   roleKeyForGroup,
+  syncPersonProfileToIdp,
   syncRoleAssignment,
   syncRoleRemoval,
   usernameFromEmail,
@@ -196,5 +198,81 @@ describe("provisionUserInIdp", () => {
       expect(result.data.pk).toBe(99);
     }
     expect(idp.calls.setPassword.length).toBe(1);
+  });
+
+  it("re-tenta apos 409 transitorio (race) e sucede", async () => {
+    const idp = createFakeAuthentikClient({ createUserPk: 99, createUserFailsTimes: 1 });
+    const result = await provisionUserInIdp(idp, baseInput);
+    expect(result.ok).toBe(true);
+    // 1a tentativa falha 409, 2a sucede.
+    expect(idp.calls.createUser.length).toBe(2);
+  });
+
+  it("desiste apos 409 persistente (esgota tentativas)", async () => {
+    const idp = createFakeAuthentikClient({ createUserFailsTimes: 99 });
+    const result = await provisionUserInIdp(idp, baseInput);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(409);
+    expect(idp.calls.createUser.length).toBe(3); // PROVISION_MAX_ATTEMPTS
+  });
+});
+
+describe("resolveUniqueUsername", () => {
+  it("retorna o base quando livre", async () => {
+    const idp = createFakeAuthentikClient();
+    expect(await resolveUniqueUsername(idp, "joao")).toBe("joao");
+  });
+
+  it("sufixa com 2 quando base ocupado", async () => {
+    const idp = createFakeAuthentikClient({ takenUsernames: ["joao"] });
+    expect(await resolveUniqueUsername(idp, "joao")).toBe("joao2");
+  });
+
+  it("pula multiplos ocupados consecutivos", async () => {
+    const idp = createFakeAuthentikClient({ takenUsernames: ["joao", "joao2", "joao3"] });
+    expect(await resolveUniqueUsername(idp, "joao")).toBe("joao4");
+  });
+
+  it("devolve o candidato quando a checagem do IdP falha", async () => {
+    const idp = createFakeAuthentikClient();
+    const breaking = {
+      ...idp,
+      findUserByUsername: async () => ({ ok: false as const, code: 500, message: "down" }),
+    };
+    expect(await resolveUniqueUsername(breaking, "joao")).toBe("joao");
+  });
+
+  it("usa fragmento aleatorio quando esgota as tentativas", async () => {
+    const taken = ["joao", ...Array.from({ length: 49 }, (_, i) => `joao${i + 2}`)];
+    const idp = createFakeAuthentikClient({ takenUsernames: taken });
+    const result = await resolveUniqueUsername(idp, "joao");
+    expect(result.startsWith("joao-")).toBe(true);
+    expect(result.length).toBe("joao-".length + 8);
+  });
+});
+
+describe("syncPersonProfileToIdp", () => {
+  it("atualiza name e email no IdP", async () => {
+    const idp = createFakeAuthentikClient();
+    await syncPersonProfileToIdp(idp, {
+      idpUserPk: 7,
+      name: "Novo Nome",
+      email: "n@x.com",
+      personId: "p-1",
+    });
+    expect(idp.calls.updateUserProfile.length).toBe(1);
+    expect(idp.calls.updateUserProfile[0]).toEqual({ pk: 7, name: "Novo Nome", email: "n@x.com" });
+  });
+
+  it("omite email quando nao informado (so atualiza name)", async () => {
+    const idp = createFakeAuthentikClient();
+    await syncPersonProfileToIdp(idp, { idpUserPk: 7, name: "Novo Nome", personId: "p-1" });
+    expect(idp.calls.updateUserProfile[0]).toEqual({ pk: 7, name: "Novo Nome", email: undefined });
+  });
+
+  it("loga warning sem throw quando o IdP falha", async () => {
+    const idp = createFakeAuthentikClient({ updateProfileFails: { code: 500, message: "boom" } });
+    await syncPersonProfileToIdp(idp, { idpUserPk: 7, name: "Novo Nome", personId: "p-1" });
+    expect(idp.calls.updateUserProfile.length).toBe(1);
   });
 });

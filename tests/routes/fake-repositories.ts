@@ -3,7 +3,9 @@ import type { RoleRepository } from "../../src/repository/role-repository.ts";
 import type { Person } from "../../src/domain/person.ts";
 import type { SystemRole } from "../../src/domain/system-role.ts";
 
-export const createFakePersonRepository = (): PersonRepository & { readonly _store: Map<string, Person> } => {
+export const createFakePersonRepository = (): PersonRepository & {
+  readonly _store: Map<string, Person>;
+} => {
   const store = new Map<string, Person>();
 
   return {
@@ -43,6 +45,8 @@ export const createFakePersonRepository = (): PersonRepository & { readonly _sto
         fullName: input.fullName,
         cpf: input.cpf ?? null,
         birthDate: input.birthDate,
+        // COALESCE: preserva email atual quando o update nao informa email.
+        email: input.email ?? existing.email,
         updatedAt: new Date().toISOString(),
       };
       store.set(id, updated);
@@ -65,7 +69,7 @@ export const createFakePersonRepository = (): PersonRepository & { readonly _sto
 
     deactivate: async (id) => {
       const existing = store.get(id);
-      if (!existing || !existing.active) return null;
+      if (!existing?.active) return null;
       const updated: Person = { ...existing, active: false, updatedAt: new Date().toISOString() };
       store.set(id, updated);
       return updated;
@@ -78,6 +82,10 @@ export const createFakePersonRepository = (): PersonRepository & { readonly _sto
       store.set(id, updated);
       return updated;
     },
+
+    remove: async (id) => store.delete(id),
+
+    listWithIdpUser: async () => [...store.values()].filter((p) => p.idpUserPk !== null),
 
     list: async (options = {}) => {
       let items = [...store.values()];
@@ -99,7 +107,9 @@ export const createFakePersonRepository = (): PersonRepository & { readonly _sto
   };
 };
 
-export const createFakeRoleRepository = (): RoleRepository & { readonly _store: Map<string, SystemRole> } => {
+export const createFakeRoleRepository = (): RoleRepository & {
+  readonly _store: Map<string, SystemRole>;
+} => {
   const store = new Map<string, SystemRole>();
 
   return {
@@ -128,7 +138,7 @@ export const createFakeRoleRepository = (): RoleRepository & { readonly _store: 
 
     findById: async (personId, roleId) => {
       const role = store.get(roleId);
-      if (!role || role.personId !== personId) return null;
+      if (role?.personId !== personId) return null;
       return role;
     },
 
@@ -140,7 +150,7 @@ export const createFakeRoleRepository = (): RoleRepository & { readonly _store: 
 
     deactivate: async (personId, roleId) => {
       const role = store.get(roleId);
-      if (!role || role.personId !== personId || !role.active) return null;
+      if (role?.personId !== personId || !role.active) return null;
       const deactivated = { ...role, active: false };
       store.set(roleId, deactivated);
       return deactivated;
@@ -148,7 +158,7 @@ export const createFakeRoleRepository = (): RoleRepository & { readonly _store: 
 
     reactivate: async (personId, roleId) => {
       const role = store.get(roleId);
-      if (!role || role.personId !== personId || role.active) return null;
+      if (role?.personId !== personId || role.active) return null;
       const reactivated = { ...role, active: true };
       store.set(roleId, reactivated);
       return reactivated;

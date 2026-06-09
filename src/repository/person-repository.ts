@@ -1,20 +1,20 @@
 import type { Sql } from "postgres";
 import type { Person, CreatePersonInput, UpdatePersonInput } from "../domain/index.ts";
 
-type ListOptions = {
+interface ListOptions {
   readonly search?: string;
   readonly cursor?: string;
   readonly limit?: number;
-};
+}
 
-type ListResult = {
+interface ListResult {
   readonly data: readonly Person[];
   readonly totalCount: number;
   readonly hasMore: boolean;
   readonly nextCursor: string | null;
-};
+}
 
-export type PersonRepository = {
+export interface PersonRepository {
   readonly create: (input: CreatePersonInput) => Promise<Person>;
   readonly findById: (id: string) => Promise<Person | null>;
   readonly findByCpf: (cpf: string) => Promise<Person | null>;
@@ -30,6 +30,11 @@ export type PersonRepository = {
   ) => Promise<Person | null>;
   readonly deactivate: (id: string) => Promise<Person | null>;
   readonly reactivate: (id: string) => Promise<Person | null>;
+  // Hard-delete (erasure, LGPD Art. 18 V). Remove roles (FK sem CASCADE) e a
+  // pessoa numa unica transacao. Retorna false se a pessoa nao existia.
+  readonly remove: (id: string) => Promise<boolean>;
+  // Pessoas com login no IdP — usado pela reconciliacao IdP<->DB.
+  readonly listWithIdpUser: () => Promise<readonly Person[]>;
 }
 
 const SELECT_FIELDS = `
@@ -63,11 +68,14 @@ export const createPersonRepository = (sql: Sql): PersonRepository => ({
   },
 
   update: async (id, input) => {
+    // email: COALESCE preserva o valor atual quando o update nao informa email
+    // (PUT sem email nao apaga o login existente). cpf segue o padrao set-or-null.
     const [row] = await sql<Person[]>`
       UPDATE people
       SET full_name = ${input.fullName},
           cpf = ${input.cpf ?? null},
           birth_date = ${input.birthDate},
+          email = COALESCE(${input.email ?? null}, email),
           updated_at = now()
       WHERE id = ${id}
       RETURNING ${sql.unsafe(SELECT_FIELDS)}
@@ -105,6 +113,27 @@ export const createPersonRepository = (sql: Sql): PersonRepository => ({
     `;
     return row ?? null;
   },
+
+  remove: async (id) => {
+    // FK system_roles.person_id NAO tem ON DELETE CASCADE — removemos os roles
+    // antes da pessoa, na mesma transacao, para evitar violacao de FK.
+    return sql.begin(async (_tx) => {
+      const tx = _tx as unknown as Sql;
+      await tx`DELETE FROM system_roles WHERE person_id = ${id}`;
+      const deleted = await tx<Person[]>`
+        DELETE FROM people WHERE id = ${id}
+        RETURNING ${sql.unsafe(SELECT_FIELDS)}
+      `;
+      return deleted.length > 0;
+    });
+  },
+
+  listWithIdpUser: async () =>
+    sql<Person[]>`
+      SELECT ${sql.unsafe(SELECT_FIELDS)} FROM people
+      WHERE idp_user_pk IS NOT NULL
+      ORDER BY id
+    `,
 
   list: async (options = {}) => {
     const limit = Math.min(options.limit ?? 20, 100);
