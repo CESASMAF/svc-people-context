@@ -18,7 +18,7 @@ This service answers one question: **does this person exist in the ACDG ecosyste
 | Database  | PostgreSQL 15 (dedicated)                      |
 | Events    | NATS JetStream (nats.js 2.29.3)                |
 | Auth      | JWT RS256 via Authentik OIDC JWKS (jose 6.2.3) |
-| Container | `oven/bun:slim` (~80MB)                        |
+| Container | distroless + binário compilado (`--bytecode`)  |
 
 ## Quick Start
 

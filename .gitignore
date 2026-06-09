@@ -32,3 +32,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Espelhos offline de docs (consulta local) — LOCAL apenas, não versionar.
+# Reproduzíveis via o respectivo handbook/references/<tech>/_SOURCE.md.
+handbook/references/bun/
+handbook/references/elysia/
+
+# Binário standalone gerado por `bun run build`
+/people-context

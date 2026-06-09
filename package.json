@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "build": "bun build --compile --minify --sourcemap --bytecode --format=esm ./src/index.ts --outfile people-context",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
-    "coverage": "bun test --coverage 2>&1 | tee /dev/stderr | node scripts/check-coverage.js",
+    "coverage": "bun test --coverage 2>&1 | tee /dev/stderr | bun scripts/check-coverage.js",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

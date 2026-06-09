@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 // Parses `bun test --coverage` output and enforces a minimum line coverage threshold.
 // Bun outputs: "All files | XX.XX% | YY.YY% | ..."

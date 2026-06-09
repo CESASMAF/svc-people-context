@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "ticket": "T-SQL-NATIVE",
+  "size": "S",
+  "createdAt": "2026-06-09T19:49:03.136Z",
+  "closedAt": null,
+  "currentWave": "W0",
+  "status": "in-progress",
+  "waves": [
+    {
+      "id": "W0",
+      "status": "done",
+      "agent": "claude",
+      "startedAt": "2026-06-09T19:49:03.191Z",
+      "finishedAt": "2026-06-09T19:49:03.226Z",
+      "rounds": 0,
+      "reportPath": "W0/REPORT.md",
+      "outcome": "RED"
+    },
+    {
+      "id": "W1",
+      "status": "pending",
+      "agent": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "rounds": 0,
+      "reportPath": null,
+      "outcome": null
+    },
+    {
+      "id": "W2",
+      "status": "pending",
+      "agent": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "rounds": 0,
+      "reportPath": null,
+      "outcome": null
+    },
+    {
+      "id": "W3",
+      "status": "pending",
+      "agent": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "rounds": 0,
+      "reportPath": null,
+      "outcome": null
+    }
+  ],
+  "blockers": [],
+  "lastEvent": "W0:finish"
+}
