@@ -27,7 +27,7 @@ docker compose up --build
 - **HTTP**: Elysia 1.4.28
 - **Database**: PostgreSQL 15 (dedicated, database-per-service)
 - **Events**: NATS JetStream via nats.js 2.29.3
-- **Auth**: JWT validation via Zitadel JWKS
+- **Auth**: JWT validation via Authentik OIDC JWKS (RS256). Roles via claim `groups` (homônimos a `system:role`). Migrado de Zitadel.
 
 ## TypeScript Guidelines
 
@@ -70,8 +70,12 @@ interface PersonRepository {
 }
 
 const createPersonRepository = (sql: Sql): PersonRepository => ({
-  findById: async (id) => { /* ... */ },
-  create: async (input) => { /* ... */ },
+  findById: async (id) => {
+    /* ... */
+  },
+  create: async (input) => {
+    /* ... */
+  },
 });
 ```
 
@@ -79,7 +83,9 @@ const createPersonRepository = (sql: Sql): PersonRepository => ({
 // WRONG — class-based
 class PersonRepository {
   constructor(private sql: Sql) {}
-  async findById(id: string) { /* ... */ }
+  async findById(id: string) {
+    /* ... */
+  }
 }
 ```
 
@@ -100,8 +106,8 @@ src/
 
 ## Security (Private Cloud Directives)
 
-- **JWT validation**: Verify RS256 signature against Zitadel JWKS at `https://auth.acdgbrasil.com.br/oauth/v2/keys`
-- **RBAC**: Role claims from JWT (`urn:zitadel:iam:org:project:roles`). Guard mutation endpoints.
+- **JWT validation**: Verify RS256 signature against Authentik OIDC JWKS. Issuer/JWKS derived from `AUTHENTIK_URL` + `AUTHENTIK_APP_SLUG` (`<url>/application/o/<slug>/` and `.../jwks/`), with `OIDC_ISSUER`/`JWKS_URL` overrides. Optional `aud` check via `OIDC_AUDIENCE`.
+- **RBAC**: Role claims from JWT `groups` claim (array of group names, homônimos a `system:role` + `superadmin`; configurable via `OIDC_ROLES_CLAIM`). Guard mutation endpoints.
 - **X-Actor-Id**: Required header on all mutation endpoints (POST, PUT, DELETE).
 - **Secrets**: NEVER hardcoded. Environment variables only, sourced from Bitwarden Secrets Manager in production.
 - **SQL injection**: Always use parameterized queries via `postgres.js` tagged templates.
@@ -126,6 +132,7 @@ src/
 ## Contracts
 
 API contracts defined in `contracts/services/people/` (separate repo):
+
 - OpenAPI 3.1: 12 endpoints (Person 5, Roles 5, Health 2)
 - AsyncAPI 3.1: 5 NATS events
 - 19 canonical YAML schemas
@@ -144,12 +151,12 @@ Para FATOS de documentação de tecnologias (sintaxe, versão exata, comportamen
 
 Invocação: delegue isolado via `subagent_type: "acdg-ref:ref-<tech>"`, ou direto `/acdg-ref:ref-<tech> <pergunta>`.
 
-| Dúvida sobre… | Consulte |
-|---|---|
-| Elysia: handler, validação (TypeBox/`t`), lifecycle, plugin, Eden | `ref-elysia` |
-| SQL, tipos, funções, GUCs, índices (PostgreSQL) | `ref-postgresql` |
-| NATS/JetStream: subjects, consumers, ack, Outbox | `ref-nats` |
-| Authentik: OIDC/OAuth2 provider, claims/scopes | `ref-authentik` |
+| Dúvida sobre…                                                     | Consulte         |
+| ----------------------------------------------------------------- | ---------------- |
+| Elysia: handler, validação (TypeBox/`t`), lifecycle, plugin, Eden | `ref-elysia`     |
+| SQL, tipos, funções, GUCs, índices (PostgreSQL)                   | `ref-postgresql` |
+| NATS/JetStream: subjects, consumers, ack, Outbox                  | `ref-nats`       |
+| Authentik: OIDC/OAuth2 provider, claims/scopes                    | `ref-authentik`  |
 
 Ainda **fora da rede** (P2): `jose` (JWT) e Bun runtime.
 
