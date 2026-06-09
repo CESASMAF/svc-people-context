@@ -33,14 +33,20 @@ export const createOutboxPublisher = (sql: Sql): EventPublisher => ({
       VALUES (${event.subject}, ${sql.json(event.payload as unknown as JSONValue)})
     `;
   },
-  close: async () => {},
+  close: async () => {
+    /* noop — pool de conexão é encerrado no shutdown do app */
+  },
 });
 
 // ─── Noop publisher (when DB not available, e.g. in tests) ─────
 
 export const createNoopPublisher = (): EventPublisher => ({
-  publish: async () => {},
-  close: async () => {},
+  publish: async () => {
+    /* noop — eventos descartados (sem Outbox em teste) */
+  },
+  close: async () => {
+    /* noop */
+  },
 });
 
 // ─── Event builders ─────────────────────────────────────────────

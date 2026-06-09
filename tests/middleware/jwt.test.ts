@@ -4,11 +4,12 @@ import type { JwtVerifier, AuthContext } from "../../src/middleware/jwt.ts";
 
 // ─── Helpers: injectable JwtVerifier stubs ──────────────────────
 
-const verifierReturning = (result: AuthContext | null): JwtVerifier =>
-  async () => result;
+const verifierReturning =
+  (result: AuthContext | null): JwtVerifier =>
+  async () =>
+    result;
 
-const guardWith = (verifier: JwtVerifier): AuthGuard =>
-  createAuthGuard(verifier);
+const guardWith = (verifier: JwtVerifier): AuthGuard => createAuthGuard(verifier);
 
 const validHeaders = (token = "valid-token", actorId = "actor-1") => ({
   authorization: `Bearer ${token}`,
@@ -68,12 +69,17 @@ describe("JWT verifier integration via AuthGuard", () => {
   });
 
   it("handles verifier that throws (simulating JWKS fetch failure)", async () => {
-    const throwingVerifier: JwtVerifier = async () => { throw new Error("JWKS unreachable"); };
+    const throwingVerifier: JwtVerifier = async () => {
+      throw new Error("JWKS unreachable");
+    };
     // The guard itself doesn't catch — but the verifier contract is to return null on failure.
     // So we test that a verifier wrapping errors returns null correctly.
     const wrappedVerifier: JwtVerifier = async (token) => {
-      try { return await throwingVerifier(token); }
-      catch { return null; }
+      try {
+        return await throwingVerifier(token);
+      } catch {
+        return null;
+      }
     };
     const safeGuard = createAuthGuard(wrappedVerifier);
     const result = await safeGuard(validHeaders());

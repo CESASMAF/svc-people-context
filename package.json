@@ -10,10 +10,23 @@
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "coverage": "bun test --coverage 2>&1 | tee /dev/stderr | node scripts/check-coverage.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "verify": "bun run typecheck && bun run format:check && bun run lint && bun test && bun run coverage",
+    "pipeline:state": "bun run scripts/pipeline/state-cli.ts",
+    "pipeline:status": "bun run scripts/pipeline/dashboard-cli.ts",
+    "pipeline:metrics": "bun run scripts/pipeline/metrics-cli.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@eslint/js": "^9",
+    "@types/bun": "latest",
+    "eslint": "^9",
+    "eslint-config-prettier": "^10",
+    "prettier": "^3",
+    "typescript-eslint": "^8"
   },
   "peerDependencies": {
     "typescript": "^5"

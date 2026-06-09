@@ -13,6 +13,7 @@ enabled: true
 This project follows strict functional programming. Classes are banned (non-negotiable).
 
 Flag:
+
 - `class` keyword anywhere in `src/`
 - `this` keyword in application code
 - `new` keyword (except for external library instantiation like `new Elysia()`)
@@ -20,6 +21,7 @@ Flag:
 - Prototype manipulation
 
 Use instead:
+
 - Plain objects with `interface` or `type`
 - Factory functions (closures) for stateful behavior
 - Higher-order functions for composition
@@ -28,10 +30,11 @@ Use instead:
 ## Examples
 
 ### Bad example
+
 ```typescript
 class PersonRepository {
   constructor(private sql: Sql) {}
-  
+
   async findById(id: string): Promise<Person | null> {
     return this.sql`SELECT * FROM people WHERE id = ${id}`.first();
   }
@@ -39,6 +42,7 @@ class PersonRepository {
 ```
 
 ### Good example
+
 ```typescript
 interface PersonRepository {
   readonly findById: (id: string) => Promise<Person | null>;
@@ -50,6 +54,8 @@ const createPersonRepository = (sql: Sql): PersonRepository => ({
     const [row] = await sql`SELECT * FROM people WHERE id = ${id}`;
     return row ? toPerson(row) : null;
   },
-  create: async (input) => { /* ... */ },
+  create: async (input) => {
+    /* ... */
+  },
 });
 ```

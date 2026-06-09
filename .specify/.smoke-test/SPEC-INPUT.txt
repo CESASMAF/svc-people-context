@@ -1,0 +1,25 @@
+Filtrar pessoas por sistema/role.
+
+Adicionar a capacidade de listar as pessoas que possuem um determinado papel
+(`system:role`) em um determinado sistema, para um admin daquele sistema acompanhar
+quem tem acesso.
+
+Na borda HTTP (UX primária do people-context):
+  GET /people?system=<system>&role=<role>
+
+Comportamento esperado:
+- <system> e <role> são strings de KnownSystem/KnownRole (validadas via TypeBox).
+- Retorna as pessoas ATIVAS que têm uma atribuição de role ativa (system_roles)
+  casando system + role, com paginação por cursor já existente.
+- Pessoas desativadas (deactivated) ou sem a role NÃO entram.
+- Envelope padrão `{ data, meta: { timestamp } }`; erro `{ success:false, error:{ code, message } }`.
+- RBAC: `admin` é escopado ao próprio sistema — `social-care:admin` só lista de
+  `social-care`; cross-system → `ROL-007`. `superadmin` vê todos.
+
+Restrições de projeto:
+- People-only. Pode validar com fakes in-memory (createFakePersonRepository /
+  createFakeRoleRepository); o filtro real é SQL parametrizado no repository.
+- Sem CPF em nenhum payload de evento NATS (LGPD HIGH-8).
+- Coverage ≥95% e gate W3 verde antes de fechar.
+
+Tamanho estimado: M (use case + query no repository + endpoint + testes).

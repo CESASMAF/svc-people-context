@@ -43,7 +43,7 @@ const request = async <T>(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-    // 204 No Content: caller deve usar T = void. Code-review HIGH-5:
+    // 204 No Content: caller deve usar T = undefined. Code-review HIGH-5:
     // restringe ao status 204 estritamente (nao confundir com 200 body vazio).
     // O cast `as T` e necessario porque o protocolo HTTP nao tem como expressar
     // "this response carries no body" no nivel de tipos do fetch.
@@ -158,7 +158,7 @@ export const createAuthentikClient = (config: AuthentikClientConfig): AuthentikC
   },
 
   deleteUser: async (userPk: AuthentikUserPk) =>
-    request<void>(config, "DELETE", `/api/v3/core/users/${userPk}/`),
+    request<undefined>(config, "DELETE", `/api/v3/core/users/${userPk}/`),
 
   updateUserAttributes: async (userPk: AuthentikUserPk, attributes: ACDGUserAttributes) =>
     request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, { attributes }),
@@ -191,10 +191,12 @@ export const createAuthentikClient = (config: AuthentikClientConfig): AuthentikC
   },
 
   addUserToGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<void>(config, "POST", `/api/v3/core/groups/${groupPk}/add_user/`, { pk: userPk }),
+    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/add_user/`, { pk: userPk }),
 
   removeUserFromGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<void>(config, "POST", `/api/v3/core/groups/${groupPk}/remove_user/`, { pk: userPk }),
+    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/remove_user/`, {
+      pk: userPk,
+    }),
 
   listUserGroups: async (userPk: AuthentikUserPk) => {
     type UserWithGroups = UserResponse & {

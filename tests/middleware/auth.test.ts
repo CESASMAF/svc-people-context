@@ -50,13 +50,16 @@ describe("Auth guard — all endpoints require authentication", () => {
 
   it("returns 401 on GET /people/:id when auth fails", async () => {
     const { app } = setup();
-    const res = await app.handle(new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000"));
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000"),
+    );
     expect(res.status).toBe(401);
   });
 });
 
 describe("Auth guard — composite role matching", () => {
-  const fakeVerifier = (roles: string[]): JwtVerifier =>
+  const fakeVerifier =
+    (roles: string[]): JwtVerifier =>
     async () => ({ sub: "test-user", roles });
 
   it("matches simple role exactly", async () => {
@@ -85,7 +88,11 @@ describe("Auth guard — composite role matching", () => {
 
   it("matches when one of multiple required roles is present", async () => {
     const guard = createAuthGuard(fakeVerifier(["queue-manager:owner"]));
-    const result = await guard({ authorization: "Bearer fake", "x-actor-id": "actor" }, ["worker", "owner", "admin"]);
+    const result = await guard({ authorization: "Bearer fake", "x-actor-id": "actor" }, [
+      "worker",
+      "owner",
+      "admin",
+    ]);
     expect(result.kind).toBe("ok");
   });
 
@@ -103,7 +110,10 @@ describe("Auth guard — composite role matching", () => {
 
   it("superadmin bypasses even with unrelated required roles", async () => {
     const guard = createAuthGuard(fakeVerifier(["superadmin"]));
-    const result = await guard({ authorization: "Bearer fake", "x-actor-id": "actor" }, ["worker", "owner"]);
+    const result = await guard({ authorization: "Bearer fake", "x-actor-id": "actor" }, [
+      "worker",
+      "owner",
+    ]);
     expect(result.kind).toBe("ok");
   });
 });

@@ -42,9 +42,9 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           return { success: false, error: { code: "PEO-001", message: validation.message } };
         }
 
-        if (body.cpf) {
+        if (body.cpf !== undefined && body.cpf !== "") {
           const existing = await people.findByCpf(body.cpf);
-          if (existing) {
+          if (existing !== null) {
             set.status = 201;
             return { data: { id: existing.id }, meta: { timestamp: timestamp() } };
           }
@@ -62,7 +62,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           }),
         );
 
-        if (body.createLogin && body.email) {
+        if (body.createLogin === true && body.email !== undefined && body.email !== "") {
           // Application layer encapsula create+setPassword (Arch M1).
           const provision = await provisionUserInIdp(idp, {
             username: usernameFromEmail(body.email),
@@ -125,7 +125,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       const result = await people.list({
         search: query["search"] ?? undefined,
         cursor: query["cursor"] ?? undefined,
-        limit: query["limit"] ? Number(query["limit"]) : undefined,
+        limit:
+          query["limit"] !== undefined && query["limit"] !== ""
+            ? Number(query["limit"])
+            : undefined,
       });
       return {
         data: result.data,
@@ -155,7 +158,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findByCpf(params.cpf);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
@@ -178,7 +181,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findById(params.personId);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
@@ -209,7 +212,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         }
 
         const updated = await people.update(params.personId, body);
-        if (!updated) {
+        if (updated === null) {
           set.status = 404;
           return { success: false, error: { code: "PEO-002", message: "Person not found" } };
         }
@@ -264,7 +267,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findById(params.personId);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
@@ -295,7 +298,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const deactivated = await people.deactivate(params.personId);
-      if (!deactivated) {
+      if (deactivated === null) {
         // Race: outro request desativou entre findById e deactivate.
         set.status = 409;
         return {
@@ -333,7 +336,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findById(params.personId);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
@@ -358,7 +361,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const reactivated = await people.reactivate(params.personId);
-      if (!reactivated) {
+      if (reactivated === null) {
         set.status = 409;
         return { success: false, error: { code: "PEO-006", message: "Person is already active" } };
       }
@@ -394,7 +397,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findById(params.personId);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
@@ -452,7 +455,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         }
 
         const person = await people.findById(params.personId);
-        if (!person) {
+        if (person === null) {
           set.status = 404;
           return { success: false, error: { code: "PEO-002", message: "Person not found" } };
         }
@@ -467,7 +470,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
 
         // email vem do body (override) ou do cadastro da pessoa.
         const email = body.email ?? person.email ?? undefined;
-        if (!email) {
+        if (email === undefined || email === "") {
           set.status = 422;
           return {
             success: false,
@@ -549,7 +552,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       const person = await people.findById(params.personId);
-      if (!person) {
+      if (person === null) {
         set.status = 404;
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }

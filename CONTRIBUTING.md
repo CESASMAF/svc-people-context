@@ -29,6 +29,7 @@ bun run typecheck
 **Read `CLAUDE.md` before writing any code.** It contains all conventions.
 
 Key rules:
+
 - **Functional TypeScript only** — no classes, no `this`, no `any`
 - **`type` over `interface`** — use type aliases for all shapes
 - **`unknown` over `any`** — always narrow with type guards

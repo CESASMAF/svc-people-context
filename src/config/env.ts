@@ -4,7 +4,7 @@ const isProduction = process.env["NODE_ENV"] === "production";
 
 const requireInProd = (key: string, fallback: string): string => {
   const value = process.env[key];
-  if (value) return value;
+  if (value !== undefined && value !== "") return value;
   if (isProduction) throw new Error(`[env] ${key} is required in production`);
   return fallback;
 };
@@ -19,17 +19,22 @@ const requireInProd = (key: string, fallback: string): string => {
 // Derivamos de AUTHENTIK_URL + AUTHENTIK_APP_SLUG; OIDC_ISSUER / JWKS_URL
 // permitem override explicito (ex: provider num dominio distinto do core).
 const authentikBaseRaw = process.env["AUTHENTIK_URL"];
-const authentikBase = authentikBaseRaw?.replace(/\/+$/, "");
+const authentikBaseTrimmed = authentikBaseRaw?.replace(/\/+$/, "");
+// String vazia é tratada como "não configurado" (mesma semântica do `||` antigo).
+const authentikBase =
+  authentikBaseTrimmed !== undefined && authentikBaseTrimmed !== ""
+    ? authentikBaseTrimmed
+    : undefined;
 const oidcAppSlug = process.env["AUTHENTIK_APP_SLUG"] ?? "people-context";
-const derivedIssuer = authentikBase ? `${authentikBase}/application/o/${oidcAppSlug}/` : undefined;
-const derivedJwks = authentikBase
-  ? `${authentikBase}/application/o/${oidcAppSlug}/jwks/`
-  : undefined;
+const derivedIssuer =
+  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/` : undefined;
+const derivedJwks =
+  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/jwks/` : undefined;
 
 const resolveOidc = (key: string, derived: string | undefined, devFallback: string): string => {
   const explicit = process.env[key];
-  if (explicit) return explicit;
-  if (derived) return derived;
+  if (explicit !== undefined && explicit !== "") return explicit;
+  if (derived !== undefined) return derived;
   if (isProduction) {
     throw new Error(
       `[env] ${key} (ou AUTHENTIK_URL + AUTHENTIK_APP_SLUG) is required in production`,
@@ -66,12 +71,13 @@ export const env = {
     ),
     // Validacao de audience opcional (claim `aud`). Quando setado, o token
     // precisa ter sido emitido para este client_id. Hardening recomendado.
-    audience: process.env["OIDC_AUDIENCE"] || undefined,
+    // Empty string → undefined (audience opcional; "" não é audience válida).
+    audience: process.env["OIDC_AUDIENCE"] !== "" ? process.env["OIDC_AUDIENCE"] : undefined,
     // Introspection RFC 7662 — fallback para access tokens opacos de service
     // accounts (Authentik expoe em <issuer>introspect/). Opcional.
     introspectUrl:
       process.env["OIDC_INTROSPECT_URL"] ??
-      (derivedIssuer ? `${derivedIssuer}introspect/` : undefined),
+      (derivedIssuer !== undefined ? `${derivedIssuer}introspect/` : undefined),
     introspectClientId: process.env["OIDC_INTROSPECT_CLIENT_ID"],
     introspectClientSecret: process.env["OIDC_INTROSPECT_CLIENT_SECRET"],
     allowedServiceAccounts:

@@ -46,7 +46,10 @@ const json = (body: unknown) => ({
 
 const createPerson = async (app: ReturnType<typeof setup>["app"]) => {
   const res = await app.handle(
-    new Request("http://localhost/api/v1/people", json({ fullName: "Ana Costa", birthDate: "1990-05-15" })),
+    new Request(
+      "http://localhost/api/v1/people",
+      json({ fullName: "Ana Costa", birthDate: "1990-05-15" }),
+    ),
   );
   return dataAs<IdData>(await parseJson(res)).id;
 };
@@ -55,7 +58,10 @@ describe("POST /api/v1/people/:personId/roles — UUID validation", () => {
   it("returns 400 for invalid personId UUID", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/not-a-uuid/roles", json({ system: "social-care", role: "patient" })),
+      new Request(
+        "http://localhost/api/v1/people/not-a-uuid/roles",
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(400);
   });
@@ -73,7 +79,9 @@ describe("PUT deactivate/reactivate — UUID validation", () => {
   it("returns 400 for invalid UUIDs on deactivate", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/not-a-uuid/roles/also-bad/deactivate", { method: "PUT" }),
+      new Request("http://localhost/api/v1/people/not-a-uuid/roles/also-bad/deactivate", {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(400);
   });
@@ -81,7 +89,9 @@ describe("PUT deactivate/reactivate — UUID validation", () => {
   it("returns 400 for invalid UUIDs on reactivate", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/not-a-uuid/roles/also-bad/reactivate", { method: "PUT" }),
+      new Request("http://localhost/api/v1/people/not-a-uuid/roles/also-bad/reactivate", {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(400);
   });
@@ -94,7 +104,10 @@ describe("POST /api/v1/people/:personId/roles", () => {
     publisher.published.length = 0; // reset after person creation
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(201);
     const body = await parseJson(res);
@@ -102,7 +115,9 @@ describe("POST /api/v1/people/:personId/roles", () => {
 
     expect(publisher.published.length).toBe(1);
     expect(publisher.published[0]!.subject).toBe("people.role.assigned");
-    const eventData = (publisher.published[0]!.payload as { data: { system: string; role: string } }).data;
+    const eventData = (
+      publisher.published[0]!.payload as { data: { system: string; role: string } }
+    ).data;
     expect(eventData.system).toBe("social-care");
     expect(eventData.role).toBe("patient");
   });
@@ -112,12 +127,18 @@ describe("POST /api/v1/people/:personId/roles", () => {
     const personId = await createPerson(app);
 
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     const countBefore = publisher.published.length;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(204);
     // No new event on idempotent call
@@ -127,7 +148,10 @@ describe("POST /api/v1/people/:personId/roles", () => {
   it("returns 404 for unknown person", async () => {
     const { app } = setup();
     const res = await app.handle(
-      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/roles", json({ system: "social-care", role: "patient" })),
+      new Request(
+        "http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/roles",
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(404);
   });
@@ -136,7 +160,10 @@ describe("POST /api/v1/people/:personId/roles", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(422);
   });
@@ -148,10 +175,16 @@ describe("GET /api/v1/people/:personId/roles", () => {
     const personId = await createPerson(app);
 
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "queue-manager", role: "professional" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "queue-manager", role: "professional" }),
+      ),
     );
 
     const res = await app.handle(new Request(`http://localhost/api/v1/people/${personId}/roles`));
@@ -162,7 +195,9 @@ describe("GET /api/v1/people/:personId/roles", () => {
 
   it("returns 404 for unknown person", async () => {
     const { app } = setup();
-    const res = await app.handle(new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/roles"));
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/people/00000000-0000-0000-0000-000000000000/roles"),
+    );
     expect(res.status).toBe(404);
   });
 });
@@ -173,19 +208,26 @@ describe("PUT /api/v1/people/:personId/roles/:roleId/deactivate", () => {
     const personId = await createPerson(app);
 
     const assignRes = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     const roleId = dataAs<IdData>(await parseJson(assignRes)).id;
     publisher.published.length = 0;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(204);
 
     expect(publisher.published.length).toBe(1);
     expect(publisher.published[0]!.subject).toBe("people.role.deactivated");
-    const eventData = (publisher.published[0]!.payload as { data: { system: string; role: string } }).data;
+    const eventData = (
+      publisher.published[0]!.payload as { data: { system: string; role: string } }
+    ).data;
     expect(eventData.system).toBe("social-care");
     expect(eventData.role).toBe("patient");
   });
@@ -194,7 +236,10 @@ describe("PUT /api/v1/people/:personId/roles/:roleId/deactivate", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/00000000-0000-0000-0000-000000000000/deactivate`, { method: "PUT" }),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles/00000000-0000-0000-0000-000000000000/deactivate`,
+        { method: "PUT" },
+      ),
     );
     expect(res.status).toBe(404);
   });
@@ -206,23 +251,32 @@ describe("PUT /api/v1/people/:personId/roles/:roleId/reactivate", () => {
     const personId = await createPerson(app);
 
     const assignRes = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     const roleId = dataAs<IdData>(await parseJson(assignRes)).id;
 
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     publisher.published.length = 0;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(204);
 
     expect(publisher.published.length).toBe(1);
     expect(publisher.published[0]!.subject).toBe("people.role.reactivated");
-    const eventData = (publisher.published[0]!.payload as { data: { system: string; role: string } }).data;
+    const eventData = (
+      publisher.published[0]!.payload as { data: { system: string; role: string } }
+    ).data;
     expect(eventData.system).toBe("social-care");
     expect(eventData.role).toBe("patient");
   });
@@ -232,12 +286,17 @@ describe("PUT /api/v1/people/:personId/roles/:roleId/reactivate", () => {
     const personId = await createPerson(app);
 
     const assignRes = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     const roleId = dataAs<IdData>(await parseJson(assignRes)).id;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(404);
   });
@@ -248,7 +307,10 @@ describe("GET /api/v1/roles", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
 
     const res = await app.handle(new Request("http://localhost/api/v1/roles?system=social-care"));
@@ -273,7 +335,10 @@ describe("Role assignment — system-scoped authorization", () => {
     const { app } = setup(["social-care:admin"]);
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(201);
   });
@@ -282,7 +347,10 @@ describe("Role assignment — system-scoped authorization", () => {
     const { app } = setup(["social-care:admin"]);
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "queue-manager", role: "worker" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "queue-manager", role: "worker" }),
+      ),
     );
     expect(res.status).toBe(403);
     const body = await parseJson(res);
@@ -293,7 +361,10 @@ describe("Role assignment — system-scoped authorization", () => {
     const { app } = setup(["superadmin"]);
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "queue-manager", role: "worker" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "queue-manager", role: "worker" }),
+      ),
     );
     expect(res.status).toBe(201);
   });
@@ -302,7 +373,10 @@ describe("Role assignment — system-scoped authorization", () => {
     const { app } = setup(["social-care:admin"]);
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "global", role: "superadmin" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "global", role: "superadmin" }),
+      ),
     );
     expect(res.status).toBe(403);
     const body = await parseJson(res);
@@ -313,7 +387,10 @@ describe("Role assignment — system-scoped authorization", () => {
     const { app } = setup(["superadmin"]);
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "global", role: "superadmin" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "global", role: "superadmin" }),
+      ),
     );
     expect(res.status).toBe(201);
   });
@@ -327,7 +404,10 @@ describe("Role assignment — self-assignment prevention", () => {
     await people.setIdpUserId(personId, "idp-user-123", 100, "test@test.com");
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "owner" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "owner" }),
+      ),
     );
     expect(res.status).toBe(403);
     const body = await parseJson(res);
@@ -340,7 +420,10 @@ describe("Role assignment — self-assignment prevention", () => {
     await people.setIdpUserId(personId, "superadmin-user", 101, "super@test.com");
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "admin" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "admin" }),
+      ),
     );
     expect(res.status).toBe(201);
   });
@@ -353,10 +436,13 @@ describe("POST /api/v1/people/:personId/roles — domain validation", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "   ", role: "patient" })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "   ", role: "patient" }),
+      ),
     );
     expect(res.status).toBe(400);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("ROL-001");
   });
 
@@ -364,10 +450,13 @@ describe("POST /api/v1/people/:personId/roles — domain validation", () => {
     const { app } = setup();
     const personId = await createPerson(app);
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles`, json({ system: "social-care", role: "   " })),
+      new Request(
+        `http://localhost/api/v1/people/${personId}/roles`,
+        json({ system: "social-care", role: "   " }),
+      ),
     );
     expect(res.status).toBe(400);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("ROL-001");
   });
 });
@@ -404,10 +493,12 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
       .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(403);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("ROL-007");
   });
 
@@ -419,7 +510,9 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     idp.calls.removeUserFromGroup.length = 0;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(204);
     expect(idp.calls.removeUserFromGroup.length).toBe(1);
@@ -433,7 +526,9 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     idp.calls.removeUserFromGroup.length = 0;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(204);
     expect(idp.calls.removeUserFromGroup.length).toBe(0);
@@ -458,7 +553,9 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     const personId = await createPerson(appSuper);
     const roleId = await assignRole(appSuper, personId, "queue-manager", "worker");
     await appSuper.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
 
     const guard = createFakeAuthGuardWithRoles(["social-care:admin"]);
@@ -471,10 +568,12 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
       .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(403);
-    const body = await parseJson(res) as unknown as { error: { code: string } };
+    const body = (await parseJson(res)) as unknown as { error: { code: string } };
     expect(body.error.code).toBe("ROL-007");
   });
 
@@ -484,12 +583,16 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     await people.setIdpUserId(personId, "uid-1", 300, "x@y.com");
     const roleId = await assignRole(app, personId, "social-care", "worker");
     await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
     );
     idp.calls.addUserToGroup.length = 0;
 
     const res = await app.handle(
-      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, { method: "PUT" }),
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
     );
     expect(res.status).toBe(204);
     expect(idp.calls.addUserToGroup.length).toBe(1);

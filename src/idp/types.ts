@@ -129,13 +129,13 @@ export interface AuthentikClient {
   readonly setPassword: (
     userPk: AuthentikUserPk,
     password: string,
-  ) => Promise<AuthentikResult<void>>;
+  ) => Promise<AuthentikResult<undefined>>;
 
-  readonly deactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<void>>;
+  readonly deactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
 
-  readonly reactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<void>>;
+  readonly reactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
 
-  readonly deleteUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<void>>;
+  readonly deleteUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
 
   readonly updateUserAttributes: (
     userPk: AuthentikUserPk,
@@ -160,12 +160,12 @@ export interface AuthentikClient {
   readonly addUserToGroup: (
     groupPk: AuthentikGroupPk,
     userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<void>>;
+  ) => Promise<AuthentikResult<undefined>>;
 
   readonly removeUserFromGroup: (
     groupPk: AuthentikGroupPk,
     userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<void>>;
+  ) => Promise<AuthentikResult<undefined>>;
 
   readonly listUserGroups: (
     userPk: AuthentikUserPk,

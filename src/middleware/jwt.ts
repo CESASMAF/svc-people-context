@@ -40,11 +40,19 @@ const extractIntrospectionRoles = (result: IntrospectionResponse): readonly stri
 const introspectToken = async (token: string): Promise<readonly string[] | null> => {
   const { introspectUrl, introspectClientId, introspectClientSecret, introspectTimeoutMs } =
     env.auth;
-  if (!introspectUrl || !introspectClientId || !introspectClientSecret) return null;
+  // Introspection só roda com os três configurados; "" ausente → request falha → null.
+  if (
+    introspectUrl === undefined ||
+    introspectClientId === undefined ||
+    introspectClientSecret === undefined
+  )
+    return null;
 
   const credentials = btoa(`${introspectClientId}:${introspectClientSecret}`);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => { controller.abort(); }, introspectTimeoutMs);
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, introspectTimeoutMs);
 
   try {
     const response = await fetch(introspectUrl, {
@@ -89,7 +97,7 @@ export const validateJwks = async (): Promise<void> => {
       throw new Error(`JWKS endpoint returned HTTP ${response.status}`);
     }
     const body = (await response.json()) as { keys?: unknown[] };
-    if (!body.keys || !Array.isArray(body.keys) || body.keys.length === 0) {
+    if (!Array.isArray(body.keys) || body.keys.length === 0) {
       throw new Error("JWKS response contains no keys");
     }
     console.log(`[jwt] JWKS validated: ${body.keys.length} key(s) from ${env.auth.jwksUrl}`);
@@ -112,17 +120,17 @@ export const createJwtVerifier = (): JwtVerifier => {
     try {
       const { payload } = await jwtVerify(token, jwks, {
         issuer: env.auth.issuer,
-        ...(env.auth.audience ? { audience: env.auth.audience } : {}),
+        ...(env.auth.audience !== undefined ? { audience: env.auth.audience } : {}),
       });
 
       const sub = payload.sub;
-      if (!sub) return null;
+      if (sub === undefined || sub === "") return null;
 
       let roles = extractRoles(payload);
 
       if (roles.length === 0 && allowedServiceAccounts.has(sub)) {
         const introspectedRoles = await introspectToken(token);
-        if (introspectedRoles) {
+        if (introspectedRoles !== null) {
           roles = introspectedRoles;
         }
       }

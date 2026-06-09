@@ -9,7 +9,9 @@ const MINIMUM_COVERAGE = 95;
 
 let input = "";
 process.stdin.setEncoding("utf-8");
-process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+});
 process.stdin.on("end", () => {
   // Match the "All files" row: "All files | 92.56 | 99.25 | ..."
   // First % is Funcs, second % is Lines
@@ -22,9 +24,13 @@ process.stdin.on("end", () => {
   const lineCoverage = parseFloat(match[2]);
 
   if (lineCoverage < MINIMUM_COVERAGE) {
-    console.error(`\nLine coverage ${lineCoverage.toFixed(2)}% is below the ${MINIMUM_COVERAGE}% threshold.`);
+    console.error(
+      `\nLine coverage ${lineCoverage.toFixed(2)}% is below the ${MINIMUM_COVERAGE}% threshold.`,
+    );
     process.exit(1);
   }
 
-  console.log(`\nLine coverage ${lineCoverage.toFixed(2)}% meets the ${MINIMUM_COVERAGE}% threshold.`);
+  console.log(
+    `\nLine coverage ${lineCoverage.toFixed(2)}% meets the ${MINIMUM_COVERAGE}% threshold.`,
+  );
 });

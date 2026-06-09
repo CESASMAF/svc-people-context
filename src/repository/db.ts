@@ -1,9 +1,9 @@
-import postgres from "postgres";
+import postgres, { type Sql } from "postgres";
 import { env } from "../config/env.ts";
 
 export type { Sql } from "postgres";
 
-export const createDb = () =>
+export const createDb = (): Sql =>
   postgres({
     host: env.db.host,
     port: env.db.port,

@@ -26,20 +26,21 @@ const publisher = createOutboxPublisher(sql);
 
 // IdP client: Authentik (ADR-027).
 const idp =
-  env.authentik.baseUrl && env.authentik.token
+  env.authentik.baseUrl !== undefined && env.authentik.token !== undefined
     ? createAuthentikClient({
         baseUrl: env.authentik.baseUrl,
         token: env.authentik.token,
       })
     : createNoopAuthentikClient();
 
-if (!env.authentik.baseUrl) {
+if (env.authentik.baseUrl === undefined) {
   console.log("[idp] AUTHENTIK_URL not set — user provisioning disabled (noop client)");
 } else {
   console.log(`[idp] Authentik client active (${env.authentik.baseUrl})`);
 }
 
-const relay = env.nats.url ? await createOutboxRelay(sql, env.nats.url) : createNoopRelay();
+const relay =
+  env.nats.url !== undefined ? await createOutboxRelay(sql, env.nats.url) : createNoopRelay();
 relay.start();
 
 const app = new Elysia()
@@ -49,18 +50,18 @@ const app = new Elysia()
   .use(createAdminRoutes({ people, guard, idp }))
   .listen({ port: env.port, hostname: env.host });
 
-console.log(`people-context running on ${app.server?.hostname}:${app.server?.port}`);
+console.log(`people-context running on ${env.host}:${env.port}`);
 
 // ─── Graceful shutdown ──────────────────────────────────────────
 
-const shutdown = async (signal: string) => {
+const shutdown = async (signal: string): Promise<void> => {
   console.log(`[shutdown] ${signal} received — draining...`);
   await relay.stop();
-  app.stop();
+  await app.stop();
   await sql.end({ timeout: 5 });
   console.log("[shutdown] Clean exit");
   process.exit(0);
 };
 
-process.on("SIGTERM", async () => shutdown("SIGTERM"));
-process.on("SIGINT", async () => shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

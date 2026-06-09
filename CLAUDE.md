@@ -145,6 +145,38 @@ API contracts defined in `contracts/services/people/` (separate repo):
 - Pattern: pure functions → easy to test without mocks
 - Coverage gate script: `scripts/check-coverage.js`
 
+## Quality gates (ESLint + Prettier + types + tests)
+
+Controle de qualidade portado do `core-api`. Os 5 checks nascem **verdes**:
+
+```bash
+bun run verify   # typecheck && format:check && lint && test && coverage (≥95%)
+```
+
+- **ESLint flat** (`eslint.config.js`, `typescript-eslint` strict+stylistic type-checked).
+  Invariantes duras são `error` (no-class, no-any, no-throw em domain/application via
+  `no-restricted-syntax`, libs proibidas); dívida de adoção é `warn` rastreável
+  (`strict-boolean-expressions` etc.) — cada ticket zera os warns do arquivo que toca.
+- **Prettier** (`.prettierrc.json`): printWidth 100, **double-quote** (estilo do repo), semi.
+- Overrides por camada: `domain/application` proíbem `throw`; adapters e `routes` relaxam
+  `require-await`/readonly; `tests` relaxa fakes.
+
+## Pipeline SDD — `people-context-sdd` (máximo rigor)
+
+Pipeline spec-driven (RED→YELLOW→GREEN, 17 fases) portado do `core-api-sdd`, em
+`.specify/`. Use para features não-triviais. **Guia completo: `.specify/README.md`**;
+protocolo de gate (texto puro, nunca `AskUserQuestion`): `.specify/.smoke-test/RUNBOOK.md`;
+princípios I–X: `.specify/memory/constitution.md`.
+
+- **Orquestração in-session** (não headless): o `people-orchestrator` percorre o
+  `.specify/workflows/people-context-sdd/workflow.yml`; `command: speckit.*` → skill
+  `/speckit-*`; `type: gate` → texto puro + `approve`/`reject`; citação → `skills_*`.
+- **Máquina fail-first W0→W3**: `bun run pipeline:state init <T> --size <S|M|L>` →
+  `wave-start/finish/round` → `close`; dashboard `bun run pipeline:status`. Tickets em
+  `.pipeline/<TICKET>/STATE.json` (histórico auditável — não deletar).
+- **Gate W3 = `/speckit-verify`** (= `bun run verify`). Decisões-chave exigem citação
+  canônica ≥4 linhas via `skills_citar` (MCP `acdg-skills`).
+
 ## Reference Network — consulta fria (especialistas externos)
 
 Para FATOS de documentação de tecnologias (sintaxe, versão exata, comportamento), não responda de memória nem chute: consulte o especialista **EXTERNO read-only**, que cita a doc oficial offline (`infra/reference/`) ou recusa. Divisão: você (interno) conhece o código e **decide**; ele (externo) só entrega o **fato citado** — nunca vê seu código.

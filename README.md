@@ -10,14 +10,14 @@ This service answers one question: **does this person exist in the ACDG ecosyste
 
 ## Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Runtime | Bun 1.3.11 |
-| HTTP | Elysia 1.4.28 |
-| Database | PostgreSQL 15 (dedicated) |
-| Events | NATS JetStream (nats.js 2.29.3) |
-| Auth | JWT RS256 via Zitadel JWKS (jose 6.2.2) |
-| Container | `oven/bun:slim` (~80MB) |
+| Component | Technology                              |
+| --------- | --------------------------------------- |
+| Runtime   | Bun 1.3.11                              |
+| HTTP      | Elysia 1.4.28                           |
+| Database  | PostgreSQL 15 (dedicated)               |
+| Events    | NATS JetStream (nats.js 2.29.3)         |
+| Auth      | JWT RS256 via Zitadel JWKS (jose 6.2.2) |
+| Container | `oven/bun:slim` (~80MB)                 |
 
 ## Quick Start
 
@@ -43,20 +43,20 @@ bun run typecheck
 
 ## API
 
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/health` | Liveness probe | None |
-| GET | `/ready` | Readiness probe (DB check) | None |
-| POST | `/api/v1/people` | Register person (CPF dedup) | `social_worker`, `admin` |
-| GET | `/api/v1/people` | List people (paginated, searchable) | `social_worker`, `owner`, `admin` |
-| GET | `/api/v1/people/:id` | Get person by ID | `social_worker`, `owner`, `admin` |
-| GET | `/api/v1/people/by-cpf/:cpf` | Find person by CPF | `social_worker`, `owner`, `admin` |
-| PUT | `/api/v1/people/:id` | Update person | `social_worker`, `admin` |
-| POST | `/api/v1/people/:id/roles` | Assign system role | `social_worker`, `admin` |
-| GET | `/api/v1/people/:id/roles` | List person roles | `social_worker`, `owner`, `admin` |
-| PUT | `/api/v1/people/:id/roles/:rid/deactivate` | Deactivate role | `admin` |
-| PUT | `/api/v1/people/:id/roles/:rid/reactivate` | Reactivate role | `admin` |
-| GET | `/api/v1/roles` | Query roles across people | `social_worker`, `owner`, `admin` |
+| Method | Path                                       | Description                         | Auth                              |
+| ------ | ------------------------------------------ | ----------------------------------- | --------------------------------- |
+| GET    | `/health`                                  | Liveness probe                      | None                              |
+| GET    | `/ready`                                   | Readiness probe (DB check)          | None                              |
+| POST   | `/api/v1/people`                           | Register person (CPF dedup)         | `social_worker`, `admin`          |
+| GET    | `/api/v1/people`                           | List people (paginated, searchable) | `social_worker`, `owner`, `admin` |
+| GET    | `/api/v1/people/:id`                       | Get person by ID                    | `social_worker`, `owner`, `admin` |
+| GET    | `/api/v1/people/by-cpf/:cpf`               | Find person by CPF                  | `social_worker`, `owner`, `admin` |
+| PUT    | `/api/v1/people/:id`                       | Update person                       | `social_worker`, `admin`          |
+| POST   | `/api/v1/people/:id/roles`                 | Assign system role                  | `social_worker`, `admin`          |
+| GET    | `/api/v1/people/:id/roles`                 | List person roles                   | `social_worker`, `owner`, `admin` |
+| PUT    | `/api/v1/people/:id/roles/:rid/deactivate` | Deactivate role                     | `admin`                           |
+| PUT    | `/api/v1/people/:id/roles/:rid/reactivate` | Reactivate role                     | `admin`                           |
+| GET    | `/api/v1/roles`                            | Query roles across people           | `social_worker`, `owner`, `admin` |
 
 All mutation endpoints require `X-Actor-Id` header and Bearer JWT.
 
@@ -88,6 +88,7 @@ docker compose up --build
 ## Contracts
 
 API contracts are defined in the `contracts` repository:
+
 - `services/people/openapi/openapi.yaml` — 12 endpoints (OpenAPI 3.1)
 - `services/people/asyncapi/asyncapi.yaml` — 5 events (AsyncAPI 3.1)
 - `services/people/model/schemas/` — 19 canonical YAML schemas

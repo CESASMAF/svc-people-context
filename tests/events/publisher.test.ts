@@ -1,5 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import { events, createNoopPublisher, createOutboxPublisher, type DomainEvent } from "../../src/events/publisher.ts";
+import {
+  events,
+  createNoopPublisher,
+  createOutboxPublisher,
+  type DomainEvent,
+} from "../../src/events/publisher.ts";
 
 // ─── Event builders ────────────────────────────────────────────
 
@@ -80,8 +85,16 @@ describe("events.roleReactivated", () => {
 
 describe("event metadata", () => {
   it("generates unique eventIds for different events", () => {
-    const e1 = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
-    const e2 = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
+    const e1 = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
+    const e2 = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
     expect(e1.payload.metadata.eventId).not.toBe(e2.payload.metadata.eventId);
   });
 });
@@ -91,7 +104,11 @@ describe("event metadata", () => {
 describe("createNoopPublisher", () => {
   it("publish does nothing (no errors)", async () => {
     const publisher = createNoopPublisher();
-    const event = events.personRegistered("a", { personId: "p", fullName: "X", birthDate: "2000-01-01" });
+    const event = events.personRegistered("a", {
+      personId: "p",
+      fullName: "X",
+      birthDate: "2000-01-01",
+    });
     await publisher.publish(event);
     // no error = success
   });
@@ -106,7 +123,7 @@ describe("createNoopPublisher", () => {
 
 describe("createOutboxPublisher", () => {
   it("writes event to outbox table using sql.json()", async () => {
-    const inserted: Array<{ subject: string; payload: unknown }> = [];
+    const inserted: { subject: string; payload: unknown }[] = [];
 
     const fakeSql = Object.assign(
       (strings: TemplateStringsArray, ...params: unknown[]) => {

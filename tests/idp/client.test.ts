@@ -239,7 +239,7 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
 
     expect(result.ok).toBe(true);
     expect(captured).not.toBeNull();
-    const body = JSON.parse(captured!.init!.body as string);
+    const body = JSON.parse(captured!.init!.body as string) as Record<string, unknown>;
     expect(body.is_active).toBe(true);
     expect(body.path).toBe("users");
     expect(body.type).toBe("internal");
@@ -339,7 +339,7 @@ describe("createAuthentikClient (unit, fetch mockado)", () => {
     const result = await client.updateUserProfile(5, { name: "Ana Nova", email: "nova@x.com" });
 
     expect(result.ok).toBe(true);
-    const body = JSON.parse(captured!.init!.body as string);
+    const body = JSON.parse(captured!.init!.body as string) as Record<string, unknown>;
     expect(body.name).toBe("Ana Nova");
     expect(body.email).toBe("nova@x.com");
     expect("attributes" in body).toBe(false); // ausente do patch → ausente do body

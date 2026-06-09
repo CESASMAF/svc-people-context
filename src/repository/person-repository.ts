@@ -45,12 +45,13 @@ const SELECT_FIELDS = `
 
 export const createPersonRepository = (sql: Sql): PersonRepository => ({
   create: async (input) => {
-    const [row] = await sql<Person[]>`
+    // Tupla [Person]: INSERT ... RETURNING devolve exatamente 1 linha → row é Person (não undefined).
+    const [row] = await sql<[Person]>`
       INSERT INTO people (full_name, cpf, birth_date, email)
       VALUES (${input.fullName}, ${input.cpf ?? null}, ${input.birthDate}, ${input.email ?? null})
       RETURNING ${sql.unsafe(SELECT_FIELDS)}
     `;
-    return row!;
+    return row;
   },
 
   findById: async (id) => {
@@ -138,27 +139,29 @@ export const createPersonRepository = (sql: Sql): PersonRepository => ({
   list: async (options = {}) => {
     const limit = Math.min(options.limit ?? 20, 100);
     const search = options.search?.trim();
-    const hasSearch = !!search;
-    const hasCursor = !!options.cursor;
+    const hasSearch = search !== undefined && search !== "";
+    const cursor =
+      options.cursor !== undefined && options.cursor !== "" ? options.cursor : undefined;
 
     const [countRow] = await sql<[{ count: string }]>`
       SELECT count(*)::text AS count FROM people
       ${hasSearch ? sql`WHERE (full_name ILIKE ${"%" + search + "%"} OR cpf LIKE ${search + "%"})` : sql``}
     `;
-    const totalCount = Number(countRow!.count);
+    const totalCount = Number(countRow.count);
 
     const rows = await sql<Person[]>`
       SELECT ${sql.unsafe(SELECT_FIELDS)} FROM people
       WHERE true
       ${hasSearch ? sql`AND (full_name ILIKE ${"%" + search + "%"} OR cpf LIKE ${search + "%"})` : sql``}
-      ${hasCursor ? sql`AND id > ${options.cursor!}` : sql``}
+      ${cursor !== undefined ? sql`AND id > ${cursor}` : sql``}
       ORDER BY id
       LIMIT ${limit + 1}
     `;
 
     const hasMore = rows.length > limit;
     const data = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore && data.length > 0 ? data[data.length - 1]!.id : null;
+    const last = data.at(-1);
+    const nextCursor = hasMore && last !== undefined ? last.id : null;
 
     return { data, totalCount, hasMore, nextCursor };
   },

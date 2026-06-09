@@ -2,15 +2,25 @@
 // Uses Record<string, unknown> with explicit field access via cast.
 // NO `any` — per TS handbook, always use `unknown` and narrow.
 
-export type ApiResponse = {
-  readonly data: unknown;
-  readonly meta: { readonly timestamp: string; readonly [k: string]: unknown };
+export interface ApiResponse {
   readonly [k: string]: unknown;
-};
+  readonly data: unknown;
+  readonly meta: { readonly [k: string]: unknown; readonly timestamp: string };
+}
 
-export type IdData = { readonly id: string };
-export type PersonData = { readonly fullName: string; readonly cpf: string | null; readonly birthDate: string };
-export type RoleData = { readonly id: string; readonly system: string; readonly role: string };
+export interface IdData {
+  readonly id: string;
+}
+export interface PersonData {
+  readonly fullName: string;
+  readonly cpf: string | null;
+  readonly birthDate: string;
+}
+export interface RoleData {
+  readonly id: string;
+  readonly system: string;
+  readonly role: string;
+}
 
 export const parseJson = async (res: Response): Promise<ApiResponse> =>
   res.json() as Promise<ApiResponse>;

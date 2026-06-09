@@ -13,11 +13,13 @@ enabled: true
 The domain layer contains only pure types and functions. No external imports.
 
 Flag:
+
 - Import from `postgres`, `nats`, `elysia`, or any runtime library
 - Import from `src/repository/`, `src/routes/`, `src/middleware/`, `src/events/`
 - Side effects (network calls, database queries, file I/O)
 
 Allowed:
+
 - Imports from other domain files
 - Pure validation functions
 - Type definitions (interface, type)

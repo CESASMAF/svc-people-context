@@ -133,7 +133,7 @@ export const syncPersonProfileToIdp = async (
 ): Promise<void> => {
   const result = await idp.updateUserProfile(args.idpUserPk, {
     name: args.name,
-    ...(args.email ? { email: args.email } : {}),
+    ...(args.email !== undefined && args.email !== "" ? { email: args.email } : {}),
   });
   if (!result.ok) {
     console.warn(
@@ -188,7 +188,7 @@ export const provisionUserInIdp = async (
     });
 
     if (createResult.ok) {
-      if (input.initialPassword) {
+      if (input.initialPassword !== undefined && input.initialPassword !== "") {
         const pwdResult = await idp.setPassword(createResult.data.pk, input.initialPassword);
         if (!pwdResult.ok) {
           console.warn(
