@@ -2,6 +2,9 @@
   "compilerOptions": {
     "lib": ["ESNext"],
     "target": "ESNext",
+    // TS 6.0: `types` passou a defaultar para [] (antes incluía todos os @types/*).
+    // Declaramos explicitamente os globais do Bun (runtime + bun:test). Ver docs/adr.
+    "types": ["bun"],
     "module": "Preserve",
     "moduleDetection": "force",
     "allowJs": true,

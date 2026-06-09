@@ -10,14 +10,15 @@ This service answers one question: **does this person exist in the ACDG ecosyste
 
 ## Stack
 
-| Component | Technology                              |
-| --------- | --------------------------------------- |
-| Runtime   | Bun 1.3.11                              |
-| HTTP      | Elysia 1.4.28                           |
-| Database  | PostgreSQL 15 (dedicated)               |
-| Events    | NATS JetStream (nats.js 2.29.3)         |
-| Auth      | JWT RS256 via Zitadel JWKS (jose 6.2.2) |
-| Container | `oven/bun:slim` (~80MB)                 |
+| Component | Technology                                     |
+| --------- | ---------------------------------------------- |
+| Runtime   | Bun 1.3.14                                     |
+| Language  | TypeScript 6.0                                 |
+| HTTP      | Elysia 1.4.28                                  |
+| Database  | PostgreSQL 15 (dedicated)                      |
+| Events    | NATS JetStream (nats.js 2.29.3)                |
+| Auth      | JWT RS256 via Authentik OIDC JWKS (jose 6.2.3) |
+| Container | `oven/bun:slim` (~80MB)                        |
 
 ## Quick Start
 

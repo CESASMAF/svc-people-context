@@ -26,14 +26,15 @@
     "eslint": "^9",
     "eslint-config-prettier": "^10",
     "prettier": "^3",
+    "typescript": "^6",
     "typescript-eslint": "^8"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6"
   },
   "dependencies": {
     "elysia": "1.4.28",
-    "jose": "6.2.2",
+    "jose": "6.2.3",
     "nats": "2.29.3",
     "postgres": "3.4.9"
   }

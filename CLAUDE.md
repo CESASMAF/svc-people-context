@@ -23,7 +23,8 @@ docker compose up --build
 
 ## Stack
 
-- **Runtime**: Bun 1.3.11
+- **Runtime**: Bun 1.3.14
+- **Language**: TypeScript 6.0 (`types: ["bun"]` — ver `docs/adr/0001`)
 - **HTTP**: Elysia 1.4.28
 - **Database**: PostgreSQL 15 (dedicated, database-per-service)
 - **Events**: NATS JetStream via nats.js 2.29.3

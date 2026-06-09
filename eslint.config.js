@@ -1,4 +1,4 @@
-// Flat config — typescript-eslint v8 + ESLint 9 (people-context · Bun 1.3 · TS 5.9)
+// Flat config — typescript-eslint v8 + ESLint 9 (people-context · Bun 1.3.14 · TS 6.0)
 // Espelha o setup de qualidade do core-api, adaptado à stack funcional (no-class)
 // deste serviço. Docs: https://typescript-eslint.io/getting-started
 //
