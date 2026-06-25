@@ -143,7 +143,11 @@ describe("createOutboxPublisher", () => {
 
     expect(inserted.length).toBe(1);
     expect(inserted[0]!.subject).toBe("people.person.registered");
-    const payload = JSON.parse(inserted[0]!.payload as string) as DomainEvent["payload"];
+    // Regressão (bug double-encoding): o payload vai como OBJETO — o Bun.sql
+    // serializa para jsonb. Antes era `JSON.stringify(...)::jsonb`, que gerava
+    // jsonb STRING e o consumidor (social-care) falhava ao decodificar.
+    expect(typeof inserted[0]!.payload).toBe("object");
+    const payload = inserted[0]!.payload as DomainEvent["payload"];
     expect(payload.actorId).toBe("actor-1");
     expect(payload.data.personId).toBe("p-1");
   });
