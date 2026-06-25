@@ -85,10 +85,13 @@ export const createOutboxRelay = async (sql: Sql, natsUrl: string): Promise<Outb
       }
 
       if (publishedIds.length > 0) {
+        // `sql(array)` expande para uma lista `IN (...)` (Bun.sql). NÃO usar
+        // `= ANY(${sql.array(...)})` aqui: serializa como json e o Postgres
+        // falha com `operator does not exist: uuid = json`.
         await sql`
           UPDATE outbox_events
           SET published = true, published_at = now()
-          WHERE id = ANY(${sql.array(publishedIds)})
+          WHERE id IN ${sql(publishedIds)}
         `;
         console.log(`[outbox-relay] Published ${publishedIds.length}/${rows.length} event(s)`);
       }
