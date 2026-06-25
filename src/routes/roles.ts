@@ -129,7 +129,7 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     )
 
     .get("/people/:personId/roles", async ({ headers, params, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"]);
+      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -288,7 +288,7 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .get("/roles", async ({ headers, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"]);
+      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
