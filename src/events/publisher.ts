@@ -28,9 +28,12 @@ export interface EventPublisher {
 
 export const createOutboxPublisher = (sql: Sql): EventPublisher => ({
   publish: async (event) => {
+    // Bun.sql serializa o objeto como jsonb automaticamente. NÃO usar
+    // JSON.stringify(...)::jsonb — isso double-encoda (vira jsonb STRING),
+    // e o consumidor (social-care) falha ao decodificar (typeMismatch).
     await sql`
       INSERT INTO outbox_events (subject, payload)
-      VALUES (${event.subject}, ${JSON.stringify(event.payload)}::jsonb)
+      VALUES (${event.subject}, ${event.payload})
     `;
   },
   close: async () => {

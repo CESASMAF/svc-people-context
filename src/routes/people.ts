@@ -116,7 +116,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     )
 
     .get("/people", async ({ headers, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"]);
+      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -143,7 +143,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     })
 
     .get("/people/by-cpf/:cpf", async ({ headers, params, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"]);
+      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -166,7 +166,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     })
 
     .get("/people/:personId", async ({ headers, params, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"]);
+      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;

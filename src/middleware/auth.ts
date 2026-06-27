@@ -18,11 +18,14 @@ export type AuthResult =
 export type AuthGuard = (
   headers: Record<string, string | undefined>,
   requiredRoles?: readonly string[],
+  // X-Actor-Id só é OBRIGATÓRIO em mutações (POST/PUT/DELETE). Leitura (GET)
+  // passa `false` e deriva o actorId do JWT.sub (ADR-023).
+  requireActor?: boolean,
 ) => Promise<AuthResult>;
 
 export const createAuthGuard =
   (verify: JwtVerifier): AuthGuard =>
-  async (headers, requiredRoles) => {
+  async (headers, requiredRoles, requireActor = true) => {
     const authorization = headers["authorization"];
     if (authorization?.startsWith("Bearer ") !== true) {
       return {
@@ -69,8 +72,10 @@ export const createAuthGuard =
       }
     }
 
-    const actorId = headers["x-actor-id"];
-    if (actorId === undefined || actorId === "") {
+    // actorId = X-Actor-Id (override explícito) OU JWT.sub (ADR-023). O header é
+    // OBRIGATÓRIO apenas em mutações (requireActor); leitura deriva do sub.
+    const actorHeader = headers["x-actor-id"];
+    if (requireActor && (actorHeader === undefined || actorHeader === "")) {
       return {
         kind: "missing-actor",
         status: 400,
@@ -80,6 +85,7 @@ export const createAuthGuard =
         },
       };
     }
+    const actorId = actorHeader !== undefined && actorHeader !== "" ? actorHeader : auth.sub;
 
     return { kind: "ok", auth, actorId };
   };
