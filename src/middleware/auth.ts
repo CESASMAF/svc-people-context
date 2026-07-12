@@ -1,4 +1,5 @@
 import type { JwtVerifier, AuthContext } from "./jwt.ts";
+import type { CerbosClient } from "./cerbos.ts";
 
 // ─── Types (discriminated union for auth results) ───────────────
 
@@ -21,11 +22,18 @@ export type AuthGuard = (
   // X-Actor-Id só é OBRIGATÓRIO em mutações (POST/PUT/DELETE). Leitura (GET)
   // passa `false` e deriva o actorId do JWT.sub (ADR-023).
   requireActor?: boolean,
+  // Autorização versionada via Cerbos (opcional). Quando informado E o Cerbos
+  // estiver configurado, a decisão do PDP é consultada APÓS o check de role local
+  // (defense-in-depth): só pode ADICIONAR negação (DENY explícito → 403); ALLOW
+  // ou indeterminado (Cerbos off/erro) deferem ao resultado local.
+  authz?: { readonly resource: string; readonly action: string },
 ) => Promise<AuthResult>;
 
 export const createAuthGuard =
-  (verify: JwtVerifier): AuthGuard =>
-  async (headers, requiredRoles, requireActor = true) => {
+  (verify: JwtVerifier, cerbos?: CerbosClient): AuthGuard =>
+  async (headers, requiredRoles, requireActor, authz) => {
+    // requireActor default = true (mutações exigem X-Actor-Id); GET passa `false`.
+    const requireActorId = requireActor ?? true;
     const authorization = headers["authorization"];
     if (authorization?.startsWith("Bearer ") !== true) {
       return {
@@ -72,10 +80,30 @@ export const createAuthGuard =
       }
     }
 
+    // Cerbos (PDP) — defense-in-depth após o check de role local. DENY explícito
+    // barra; ALLOW/indeterminado (Cerbos off/erro) deferem — o Cerbos só ADICIONA
+    // negação, nunca concede além do guard local. auth.sub = principal do decision log.
+    if (authz !== undefined && cerbos !== undefined) {
+      const decision = await cerbos.check(auth.roles, authz.resource, authz.action, auth.sub);
+      if (decision === false) {
+        return {
+          kind: "forbidden",
+          status: 403,
+          response: {
+            success: false,
+            error: {
+              code: "AUTH-002",
+              message: `Cerbos negou ${authz.action} em ${authz.resource}`,
+            },
+          },
+        };
+      }
+    }
+
     // actorId = X-Actor-Id (override explícito) OU JWT.sub (ADR-023). O header é
     // OBRIGATÓRIO apenas em mutações (requireActor); leitura deriva do sub.
     const actorHeader = headers["x-actor-id"];
-    if (requireActor && (actorHeader === undefined || actorHeader === "")) {
+    if (requireActorId && (actorHeader === undefined || actorHeader === "")) {
       return {
         kind: "missing-actor",
         status: 400,

@@ -4,14 +4,14 @@ import { createPeopleRoutes } from "../../src/routes/people.ts";
 import { createFakePersonRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
-import { createFakeAuthentikClient, type FakeAuthentikOverrides } from "./fake-authentik.ts";
+import { createFakeIdpClient, type FakeIdpOverrides } from "./fake-idp.ts";
 import { parseJson, dataAs, type IdData } from "./test-types.ts";
 
-const setup = (idpOverrides: FakeAuthentikOverrides = {}) => {
+const setup = (idpOverrides: FakeIdpOverrides = {}) => {
   const people = createFakePersonRepository();
   const guard = createFakeAuthGuard();
   const publisher = createFakePublisher();
-  const idp = createFakeAuthentikClient(idpOverrides);
+  const idp = createFakeIdpClient(idpOverrides);
   const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
   return { app, people, publisher, idp };
 };
@@ -33,10 +33,9 @@ const createPerson = async (
 // ─── POST /people com createLogin → provisionamento IdP ─────────
 
 describe("POST /api/v1/people — createLogin path", () => {
-  it("provisiona user no IdP e persiste uid + pk quando createLogin=true", async () => {
+  it("provisiona user no IdP e persiste o id quando createLogin=true", async () => {
     const { app, people, publisher, idp } = setup({
-      createUserPk: 77,
-      createUserUid: "uid-77",
+      createUserId: "id-77",
     });
 
     const res = await app.handle(
@@ -56,11 +55,11 @@ describe("POST /api/v1/people — createLogin path", () => {
     const { id } = dataAs<IdData>(await parseJson(res));
 
     expect(idp.calls.createUser.length).toBe(1);
-    expect(idp.calls.setPassword[0]?.pk).toBe(77);
+    // A senha inicial vai direto no createUser (credentials do Kratos).
+    expect(idp.calls.createUser[0]?.password).toBe("Secret123!");
 
     const stored = await people.findById(id);
-    expect(stored?.idpUserId).toBe("uid-77");
-    expect(stored?.idpUserPk).toBe(77);
+    expect(stored?.idpUserId).toBe("id-77");
 
     const events = publisher.published.map((p) => p.subject);
     expect(events).toContain("people.user.provisioned");
@@ -94,8 +93,8 @@ describe("POST /api/v1/people — createLogin path", () => {
 // ─── PUT /people/:id/deactivate ─────────────────────────────────
 
 describe("PUT /api/v1/people/:personId/deactivate", () => {
-  const provision = async (overrides: FakeAuthentikOverrides = {}) => {
-    const ctx = setup({ createUserPk: 50, createUserUid: "uid-50", ...overrides });
+  const provision = async (overrides: FakeIdpOverrides = {}) => {
+    const ctx = setup({ createUserId: "id-50", ...overrides });
     const personId = await createPerson(ctx.app, {
       fullName: "Ana Costa",
       birthDate: "1990-05-15",
@@ -114,7 +113,7 @@ describe("PUT /api/v1/people/:personId/deactivate", () => {
     );
 
     expect(res.status).toBe(204);
-    expect(idp.calls.deactivateUser).toEqual([50]);
+    expect(idp.calls.deactivateUser).toEqual(["id-50"]);
     const stored = await people.findById(personId);
     expect(stored?.active).toBe(false);
     expect(publisher.published.map((p) => p.subject)).toContain("people.user.deactivated");
@@ -163,9 +162,9 @@ describe("PUT /api/v1/people/:personId/deactivate", () => {
     expect(res.status).toBe(502);
     const body = (await parseJson(res)) as unknown as { error: { code: string; message: string } };
     expect(body.error.code).toBe("IDP-002");
-    // AppSec HIGH-7: nao vazar message do Authentik
+    // AppSec HIGH-7: nao vazar message do IdP
     expect(body.error.message).not.toContain("idp down");
-    expect(idp.calls.deactivateUser).toEqual([50]);
+    expect(idp.calls.deactivateUser).toEqual(["id-50"]);
 
     const stored = await people.findById(personId);
     expect(stored?.active).toBe(true); // DB intocado
@@ -185,8 +184,8 @@ describe("PUT /api/v1/people/:personId/deactivate", () => {
 // ─── PUT /people/:id/reactivate ─────────────────────────────────
 
 describe("PUT /api/v1/people/:personId/reactivate", () => {
-  const setupDeactivated = async (overrides: FakeAuthentikOverrides = {}) => {
-    const ctx = setup({ createUserPk: 60, createUserUid: "uid-60", ...overrides });
+  const setupDeactivated = async (overrides: FakeIdpOverrides = {}) => {
+    const ctx = setup({ createUserId: "id-60", ...overrides });
     const personId = await createPerson(ctx.app, {
       fullName: "Ana Costa",
       birthDate: "1990-05-15",
@@ -209,7 +208,7 @@ describe("PUT /api/v1/people/:personId/reactivate", () => {
     );
 
     expect(res.status).toBe(204);
-    expect(idp.calls.reactivateUser).toEqual([60]);
+    expect(idp.calls.reactivateUser).toEqual(["id-60"]);
     const stored = await people.findById(personId);
     expect(stored?.active).toBe(true);
     expect(publisher.published.map((p) => p.subject)).toContain("people.user.reactivated");
@@ -273,8 +272,8 @@ describe("PUT /api/v1/people/:personId/reactivate", () => {
 // ─── POST /people/:id/request-password-reset ────────────────────
 
 describe("POST /api/v1/people/:personId/request-password-reset", () => {
-  const provision = async (overrides: FakeAuthentikOverrides = {}) => {
-    const ctx = setup({ createUserPk: 70, createUserUid: "uid-70", ...overrides });
+  const provision = async (overrides: FakeIdpOverrides = {}) => {
+    const ctx = setup({ createUserId: "id-70", ...overrides });
     const personId = await createPerson(ctx.app, {
       fullName: "Ana Costa",
       birthDate: "1990-05-15",
@@ -299,7 +298,7 @@ describe("POST /api/v1/people/:personId/request-password-reset", () => {
     expect(res.status).toBe(202);
     const body = await parseJson(res);
     expect((body as unknown as { data?: unknown }).data).toBeUndefined();
-    expect(idp.calls.requestPasswordReset).toEqual([70]);
+    expect(idp.calls.requestPasswordReset).toEqual(["id-70"]);
 
     const event = publisher.published.find(
       (p) => p.subject === "people.user.password_reset_requested",

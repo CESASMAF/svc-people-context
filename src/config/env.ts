@@ -40,36 +40,17 @@ const requireSecretInProd = (key: string, fallback: string): string => {
   return fallback;
 };
 
-// ─── OIDC issuer/JWKS — alvo: Authentik self-hosted (deploy BV) ──
+// ─── OIDC issuer/JWKS — IdP: Ory Hydra ─────────────────────────
 //
-// Os endpoints OIDC do Authentik sao derivados da application:
-//   issuer  = <AUTHENTIK_URL>/application/o/<slug>/
-//   jwks    = <AUTHENTIK_URL>/application/o/<slug>/jwks/
-// (ref-authentik: add-secure-apps/providers/oauth2/index.mdx — "OAuth2 endpoints").
-//
-// Derivamos de AUTHENTIK_URL + AUTHENTIK_APP_SLUG; OIDC_ISSUER / JWKS_URL
-// permitem override explicito (ex: provider num dominio distinto do core).
-const authentikBaseRaw = process.env["AUTHENTIK_URL"];
-const authentikBaseTrimmed = authentikBaseRaw?.replace(/\/+$/, "");
-// String vazia é tratada como "não configurado" (mesma semântica do `||` antigo).
-const authentikBase =
-  authentikBaseTrimmed !== undefined && authentikBaseTrimmed !== ""
-    ? authentikBaseTrimmed
-    : undefined;
-const oidcAppSlug = process.env["AUTHENTIK_APP_SLUG"] ?? "people-context";
-const derivedIssuer =
-  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/` : undefined;
-const derivedJwks =
-  authentikBase !== undefined ? `${authentikBase}/application/o/${oidcAppSlug}/jwks/` : undefined;
+// Com Ory o issuer é o Hydra (auth.<domain>, SEM path de slug); o JWKS é buscado
+// internamente na malha (http://hydra:4444/.well-known/jwks.json). OIDC_ISSUER e
+// JWKS_URL vêm explícitos do compose (derivados de DOMAIN).
 
-const resolveOidc = (key: string, derived: string | undefined, devFallback: string): string => {
+const resolveOidc = (key: string, devFallback: string): string => {
   const explicit = process.env[key];
   if (explicit !== undefined && explicit !== "") return explicit;
-  if (derived !== undefined) return derived;
   if (isProduction) {
-    throw new Error(
-      `[env] ${key} (ou AUTHENTIK_URL + AUTHENTIK_APP_SLUG) is required in production`,
-    );
+    throw new Error(`[env] ${key} é obrigatório em produção (IdP Ory)`);
   }
   return devFallback;
 };
@@ -88,27 +69,18 @@ export const env = {
   },
 
   auth: {
-    // Authentik OIDC (ADR-027). Migrado de Zitadel — provisionamento e
-    // validacao de token agora apontam para o MESMO IdP (sem split-brain).
-    issuer: resolveOidc(
-      "OIDC_ISSUER",
-      derivedIssuer,
-      "https://auth.acdg-bv.org.br/application/o/people-context/",
-    ),
-    jwksUrl: resolveOidc(
-      "JWKS_URL",
-      derivedJwks,
-      "https://auth.acdg-bv.org.br/application/o/people-context/jwks/",
-    ),
+    // OIDC do Ory Hydra. issuer = auth.<domain> (o `iss` do token); o JWKS é
+    // buscado interno na malha. Ambos vêm explícitos do compose (derivados de DOMAIN).
+    issuer: resolveOidc("OIDC_ISSUER", "https://auth.cesasmaf.app.br"),
+    jwksUrl: resolveOidc("JWKS_URL", "http://localhost:4444/.well-known/jwks.json"),
     // Validacao de audience opcional (claim `aud`). Quando setado, o token
-    // precisa ter sido emitido para este client_id. Hardening recomendado.
+    // precisa ter sido emitido para este client_id (= acdg-web). Recomendado.
     // Empty string → undefined (audience opcional; "" não é audience válida).
     audience: process.env["OIDC_AUDIENCE"] !== "" ? process.env["OIDC_AUDIENCE"] : undefined,
-    // Introspection RFC 7662 — fallback para access tokens opacos de service
-    // accounts (Authentik expoe em <issuer>introspect/). Opcional.
-    introspectUrl:
-      process.env["OIDC_INTROSPECT_URL"] ??
-      (derivedIssuer !== undefined ? `${derivedIssuer}introspect/` : undefined),
+    // Introspection RFC 7662 — fallback opcional p/ tokens opacos. Com Hydra os
+    // access tokens são JWT (strategy jwt), então a validação por JWKS basta; só
+    // ativa se OIDC_INTROSPECT_URL for setado (ex.: Hydra Admin /admin/oauth2/introspect).
+    introspectUrl: process.env["OIDC_INTROSPECT_URL"],
     introspectClientId: process.env["OIDC_INTROSPECT_CLIENT_ID"],
     introspectClientSecret: process.env["OIDC_INTROSPECT_CLIENT_SECRET"],
     allowedServiceAccounts:
@@ -117,8 +89,9 @@ export const env = {
         .map((s) => s.trim())
         .filter(Boolean) ?? [],
     introspectTimeoutMs: Number(process.env["INTROSPECT_TIMEOUT_MS"] ?? 5000),
-    // Claim que carrega os grupos do usuario no token Authentik (array de
-    // nomes). Os grupos sao homonimos a `system:role` (ADR-029) + `superadmin`.
+    // Claim que carrega os grupos do usuario no token (array de nomes). Os grupos
+    // sao homonimos a `<system>:role` (ADR-029) + `superadmin`, injetados pela
+    // consent-bridge do Ory. Mantém-se `groups`.
     rolesClaim: process.env["OIDC_ROLES_CLAIM"] ?? "groups",
   },
 
@@ -126,30 +99,23 @@ export const env = {
     url: process.env["NATS_URL"],
   },
 
-  // IdP: Authentik (ADR-027).
-  // AppSec HIGH-10: validacao consistente — ambos OU nenhum.
-  authentik: {
-    baseUrl: process.env["AUTHENTIK_URL"],
-    token: fromFileOrEnv("AUTHENTIK_TOKEN"), // aceita AUTHENTIK_TOKEN_FILE (/run/secrets)
+  // Cerbos (PDP) — RBAC versionado/auditável (defense-in-depth com o guard local).
+  // Sem CERBOS_URL, o guard usa só o check de role local.
+  cerbos: {
+    url: process.env["CERBOS_URL"],
+  },
+
+  // IdP: Ory Kratos (Admin API). Provisionamento via Kratos Admin (interna, sem
+  // token Bearer — a proteção é isolação de rede). `token` opcional só se um proxy
+  // com Bearer for posto na frente do Admin (defesa-em-profundidade — follow-up).
+  ory: {
+    kratosAdminUrl: process.env["KRATOS_ADMIN_URL"],
+    kratosAdminToken: fromFileOrEnv("KRATOS_ADMIN_TOKEN"), // aceita KRATOS_ADMIN_TOKEN_FILE
   },
 } as const;
 
-// AppSec HIGH-10: validacao de coerencia das envs do IdP no boot.
-// Falha cedo (fail-fast) se config for parcial — evita degradacao silenciosa
-// onde createUser silenciosamente nao chama Authentik por causa de noop client.
-const { baseUrl: authentikUrl, token: authentikToken } = env.authentik;
-const authentikConfigured = authentikUrl !== undefined && authentikToken !== undefined;
-const authentikPartial =
-  !authentikConfigured && (authentikUrl !== undefined || authentikToken !== undefined);
-
-if (authentikPartial) {
-  const missing = authentikUrl === undefined ? "AUTHENTIK_URL" : "AUTHENTIK_TOKEN";
-  throw new Error(
-    `[env] Authentik config invalida — ${missing} ausente. ` +
-      `Defina AMBOS AUTHENTIK_URL e AUTHENTIK_TOKEN, ou NENHUM (para modo noop em dev).`,
-  );
-}
-
-if (isProduction && !authentikConfigured) {
-  throw new Error("[env] AUTHENTIK_URL + AUTHENTIK_TOKEN sao obrigatorios em producao.");
+// Fail-fast em produção: o provisionamento de identidades precisa do Kratos Admin.
+// Sem ele, o app cai no cliente noop (provisioning desabilitado) — inaceitável em prod.
+if (isProduction && env.ory.kratosAdminUrl === undefined) {
+  throw new Error("[env] KRATOS_ADMIN_URL é obrigatório em produção (provisionamento IdP).");
 }

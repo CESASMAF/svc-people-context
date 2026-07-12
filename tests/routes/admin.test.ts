@@ -3,14 +3,14 @@ import { Elysia } from "elysia";
 import { createAdminRoutes } from "../../src/routes/admin.ts";
 import { createFakePersonRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard, createFakeAuthGuardWithRoles } from "./fake-auth.ts";
-import { createFakeAuthentikClient, type FakeAuthentikOverrides } from "./fake-authentik.ts";
+import { createFakeIdpClient, type FakeIdpOverrides } from "./fake-idp.ts";
 import type { AuthGuard } from "../../src/middleware/auth.ts";
 import { parseJson } from "./test-types.ts";
 
-const setup = (opts: { idp?: FakeAuthentikOverrides; guard?: AuthGuard } = {}) => {
+const setup = (opts: { idp?: FakeIdpOverrides; guard?: AuthGuard } = {}) => {
   const people = createFakePersonRepository();
   const guard = opts.guard ?? createFakeAuthGuardWithRoles(["superadmin"]);
-  const idp = createFakeAuthentikClient(opts.idp ?? {});
+  const idp = createFakeIdpClient(opts.idp ?? {});
   const app = new Elysia().use(createAdminRoutes({ people, guard, idp }));
   return { app, people, idp };
 };
@@ -27,9 +27,9 @@ interface ReconcileReport {
 describe("POST /api/v1/admin/reconcile-idp", () => {
   it("reconcilia e corrige divergencias (superadmin)", async () => {
     // p-1 ativo no DB, mas inativo no IdP → deve reativar.
-    const { app, people } = setup({ idp: { getUserActiveByPk: { 201: false } } });
+    const { app, people } = setup({ idp: { getUserActiveById: { "id-201": false } } });
     const id1 = (await people.create({ fullName: "Ativo", birthDate: "2000-01-01" })).id;
-    await people.setIdpUserId(id1, "uid-201", 201, "a@x.com");
+    await people.setIdpUserId(id1, "id-201", "a@x.com");
 
     const res = await app.handle(new Request(url, { method: "POST" }));
 

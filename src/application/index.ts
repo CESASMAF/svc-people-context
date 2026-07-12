@@ -1,7 +1,5 @@
 export {
-  findGroupByRoleKey,
   provisionUserInIdp,
-  resolveUniqueUsername,
   roleKeyForGroup,
   syncPersonProfileToIdp,
   syncRoleAssignment,

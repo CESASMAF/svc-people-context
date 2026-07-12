@@ -111,6 +111,18 @@ const migrations: readonly Migration[] = [
       await sql`ALTER INDEX IF EXISTS idx_people_zitadel RENAME TO idx_people_idp_user_id`;
     },
   },
+  {
+    version: 7,
+    name: "drop_idp_user_pk",
+    // Migração Authentik → Ory Kratos: no Kratos o identificador é o `id` (UUID) da
+    // identity, que já vive em `idp_user_id` (= `sub` do JWT). O `pk` integer do
+    // Authentik (idp_user_pk, migration 5) é redundante — todas as chamadas outbound
+    // passam a usar `idp_user_id`. Idempotente (IF EXISTS).
+    up: async (sql) => {
+      await sql`DROP INDEX IF EXISTS idx_people_idp_pk`;
+      await sql`ALTER TABLE people DROP COLUMN IF EXISTS idp_user_pk`;
+    },
+  },
 ];
 
 // ─── Migration runner ──────────────────────────────────────────
