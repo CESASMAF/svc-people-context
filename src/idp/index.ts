@@ -1,16 +1,12 @@
 export type {
   ACDGUserAttributes,
-  AuthentikClient,
-  AuthentikGroupPk,
-  AuthentikResult,
-  AuthentikUserPk,
-  AuthentikUserUid,
-  CreateServiceAccountInput,
   CreateUserInput,
-  GroupSummary,
+  IdpClient,
+  IdpResult,
+  IdpUser,
+  IdpUserId,
   RecoveryLinkResponse,
-  ServiceAccountResponse,
-  UserResponse,
+  UpdateUserProfileInput,
 } from "./types.ts";
 
-export { createAuthentikClient, createNoopAuthentikClient } from "./client.ts";
+export { createIdpClient, createNoopIdpClient } from "./client.ts";

@@ -1,37 +1,29 @@
-// ─── Authentik Management API types ────────────────────────────
+// ─── Ory Kratos Admin API types ─────────────────────────────────
 //
-// Tipos cobrem operacoes que `people-context` precisa: CRUD de users,
-// gerenciamento de groups, password reset, service accounts (M2M).
+// Migrado da Management API do Authentik (ADR-027) para a Admin API do Kratos.
+// Um "user" = uma **identity** do Kratos, com um único identificador:
+//   `id` (UUID) — vai no `sub` do JWT (via Hydra consent-bridge) e é o actorId
+//   do audit trail (ADR-023). Não há mais `pk` (int) nem `uid` (hex) separados.
 //
-// Identificadores no Authentik:
-// - `pk` (number)   — primary key interno do Django. Usado em endpoints (/api/v3/core/users/{pk}/).
-// - `uid` (string)  — hash hex64 estavel. Vai no `sub` do JWT — usado como actorId no audit trail (ADR-023).
-//
-// Para `social-care` o `uid` e o actorId. Para chamadas outbound, use `pk`.
+// Papéis (roles) NÃO são objetos de grupo: a associação vive em
+// `metadata_public.groups` (array `<system>:<role>` + `superadmin`), editada por
+// read-modify-write (GET + PUT) na identity. É desse array que a consent-bridge
+// deriva o claim `groups` do token.
 
 // ─── Result type (no throw boundary, ADR-014 cross-context) ─────
 
-export type AuthentikResult<T> =
+export type IdpResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly code: number; readonly message: string };
 
-// ─── Identifier types ───────────────────────────────────────────
+// ─── Identifier ─────────────────────────────────────────────────
 
-export type AuthentikUserPk = number;
-export type AuthentikUserUid = string;
-export type AuthentikGroupPk = string; // UUID
+export type IdpUserId = string; // Kratos identity UUID (= `sub` do JWT)
 
-// ─── Custom attributes ACDG ────────────────────────────────────
+// ─── Custom attributes ACDG (vão em metadata_public, ao lado de `groups`) ──
 //
-// Decidido em 2026-05-13 (ADR-027 secao "Decisoes operacionais"):
-// `org_id` em toda conta cadastrada (preparado para multi-org futuro sem refactor).
-// `legacy_zitadel_sub` presente apenas em users migrados (ADR-031).
-
-// AppSec CRITICAL-3 fix: shape FECHADO (sem index signature).
-// Bloqueia mass assignment de chaves arbitrarias vindas do body
-// para attributes — especialmente `legacy_zitadel_sub` que vira
-// claim no JWT via property mapping `acdg-roles`. Index signature
-// `[key: string]: unknown` foi removida.
+// AppSec CRITICAL-3: shape FECHADO (sem index signature) — bloqueia mass
+// assignment de chaves arbitrárias, em especial `legacy_zitadel_sub`.
 export interface ACDGUserAttributes {
   readonly cpf?: string;
   readonly person_id?: string;
@@ -45,134 +37,74 @@ export interface ACDGUserAttributes {
 // ─── User CRUD ──────────────────────────────────────────────────
 
 export interface CreateUserInput {
-  readonly username: string;
+  readonly username: string; // display/audit — persistido em metadata_public.username
   readonly name: string;
-  readonly email: string;
+  readonly email: string; // identifier de login no Kratos (credentials.password)
   readonly is_active?: boolean; // default true
-  readonly path?: string; // default "users"
-  readonly type?: "internal" | "external" | "service_account"; // default "internal"
-  readonly groups?: readonly AuthentikGroupPk[];
+  readonly groups?: readonly string[]; // roles `<system>:<role>` (default [])
   readonly attributes?: ACDGUserAttributes;
+  readonly password?: string; // senha inicial (opcional) — gravada na criação
 }
 
-// Patch de perfil — campos editaveis sincronizados a partir de PUT /people/:id.
-// Todos opcionais: PATCH no Authentik so envia o que mudou.
+// Patch de perfil — só envia o que mudou (PUT parcial via read-modify-write).
 export interface UpdateUserProfileInput {
   readonly name?: string;
   readonly email?: string;
   readonly attributes?: ACDGUserAttributes;
 }
 
-export interface UserResponse {
-  readonly pk: AuthentikUserPk;
-  readonly uid: AuthentikUserUid;
+export interface IdpUser {
+  readonly id: IdpUserId;
   readonly username: string;
   readonly name: string;
   readonly email: string;
-  readonly is_active: boolean;
-  readonly is_superuser: boolean;
-  readonly groups: readonly AuthentikGroupPk[];
-  readonly attributes: ACDGUserAttributes;
-  readonly date_joined: string; // ISO 8601
-  readonly last_login: string | null;
-}
-
-// ─── Group ──────────────────────────────────────────────────────
-
-export interface GroupSummary {
-  readonly pk: AuthentikGroupPk;
-  readonly name: string;
-  readonly is_superuser: boolean;
-}
-
-// ─── Service Account (M2M) ──────────────────────────────────────
-//
-// Endpoint POST /api/v3/core/users/service_account/ cria SA + token + group
-// em uma unica chamada. Token retornado e Bearer pronto para usar.
-// Detalhes em ADR-027 secao "Service accounts (M2M)".
-
-export interface CreateServiceAccountInput {
-  readonly name: string;
-  readonly create_group?: boolean; // default false
-  readonly expiring?: boolean; // default true
-  readonly expires?: string; // ISO 8601, default +360d
-}
-
-export interface ServiceAccountResponse {
-  readonly username: string;
-  readonly token: string; // Bearer token pronto para uso
-  readonly user_uid: AuthentikUserUid;
-  readonly user_pk: AuthentikUserPk;
-  readonly group_pk?: AuthentikGroupPk;
+  readonly active: boolean; // Kratos state === "active"
+  readonly groups: readonly string[]; // metadata_public.groups
+  readonly attributes: ACDGUserAttributes; // metadata_public sem `groups`/`username`
+  readonly createdAt: string; // identity.created_at (ISO 8601)
 }
 
 // ─── Recovery (password reset) ──────────────────────────────────
 
 export interface RecoveryLinkResponse {
-  readonly link: string; // URL one-time para o user clicar
+  readonly link: string; // Kratos recovery_link (URL one-time)
 }
 
 // ─── Client contract ────────────────────────────────────────────
 
-export interface AuthentikClient {
+export interface IdpClient {
   // Users
-  readonly createUser: (input: CreateUserInput) => Promise<AuthentikResult<UserResponse>>;
+  readonly createUser: (input: CreateUserInput) => Promise<IdpResult<IdpUser>>;
 
-  readonly getUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<UserResponse>>;
+  readonly getUser: (id: IdpUserId) => Promise<IdpResult<IdpUser>>;
 
-  readonly findUserByUsername: (username: string) => Promise<AuthentikResult<UserResponse | null>>;
+  readonly findUserByEmail: (email: string) => Promise<IdpResult<IdpUser | null>>;
 
-  // Resolve uid (sub do JWT, gravado em people.idp_user_id) -> user completo
-  // Usado pelas rotas quando temos so o uid persistido mas precisamos do pk.
-  readonly findUserByUid: (uid: AuthentikUserUid) => Promise<AuthentikResult<UserResponse | null>>;
+  readonly setPassword: (id: IdpUserId, password: string) => Promise<IdpResult<undefined>>;
 
-  readonly setPassword: (
-    userPk: AuthentikUserPk,
-    password: string,
-  ) => Promise<AuthentikResult<undefined>>;
+  readonly deactivateUser: (id: IdpUserId) => Promise<IdpResult<undefined>>;
 
-  readonly deactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
+  readonly reactivateUser: (id: IdpUserId) => Promise<IdpResult<undefined>>;
 
-  readonly reactivateUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
-
-  readonly deleteUser: (userPk: AuthentikUserPk) => Promise<AuthentikResult<undefined>>;
+  readonly deleteUser: (id: IdpUserId) => Promise<IdpResult<undefined>>;
 
   readonly updateUserAttributes: (
-    userPk: AuthentikUserPk,
+    id: IdpUserId,
     attributes: ACDGUserAttributes,
-  ) => Promise<AuthentikResult<UserResponse>>;
+  ) => Promise<IdpResult<IdpUser>>;
 
-  // Atualiza perfil (name/email/attributes) — usado para manter o IdP em
-  // sincronia com PUT /people/:id. PATCH parcial: so envia campos presentes.
   readonly updateUserProfile: (
-    userPk: AuthentikUserPk,
+    id: IdpUserId,
     patch: UpdateUserProfileInput,
-  ) => Promise<AuthentikResult<UserResponse>>;
+  ) => Promise<IdpResult<IdpUser>>;
 
   // Recovery (password reset)
-  readonly requestPasswordReset: (
-    userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<RecoveryLinkResponse>>;
+  readonly requestPasswordReset: (id: IdpUserId) => Promise<IdpResult<RecoveryLinkResponse>>;
 
-  // Groups
-  readonly findGroupByName: (name: string) => Promise<AuthentikResult<GroupSummary | null>>;
+  // Roles (metadata_public.groups) — `group` é a string `<system>:<role>`
+  readonly addUserToGroup: (group: string, id: IdpUserId) => Promise<IdpResult<undefined>>;
 
-  readonly addUserToGroup: (
-    groupPk: AuthentikGroupPk,
-    userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<undefined>>;
+  readonly removeUserFromGroup: (group: string, id: IdpUserId) => Promise<IdpResult<undefined>>;
 
-  readonly removeUserFromGroup: (
-    groupPk: AuthentikGroupPk,
-    userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<undefined>>;
-
-  readonly listUserGroups: (
-    userPk: AuthentikUserPk,
-  ) => Promise<AuthentikResult<readonly GroupSummary[]>>;
-
-  // Service Account (M2M)
-  readonly createServiceAccount: (
-    input: CreateServiceAccountInput,
-  ) => Promise<AuthentikResult<ServiceAccountResponse>>;
+  readonly listUserGroups: (id: IdpUserId) => Promise<IdpResult<readonly string[]>>;
 }

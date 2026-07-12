@@ -4,15 +4,15 @@ import { createPeopleRoutes } from "../../src/routes/people.ts";
 import { createFakePersonRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard, createFakeAuthGuardWithRoles } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
-import { createFakeAuthentikClient, type FakeAuthentikOverrides } from "./fake-authentik.ts";
+import { createFakeIdpClient, type FakeIdpOverrides } from "./fake-idp.ts";
 import type { AuthGuard } from "../../src/middleware/auth.ts";
 import { parseJson, dataAs, type IdData } from "./test-types.ts";
 
-const setup = (opts: { idp?: FakeAuthentikOverrides; guard?: AuthGuard } = {}) => {
+const setup = (opts: { idp?: FakeIdpOverrides; guard?: AuthGuard } = {}) => {
   const people = createFakePersonRepository();
   const guard = opts.guard ?? createFakeAuthGuard();
   const publisher = createFakePublisher();
-  const idp = createFakeAuthentikClient(opts.idp ?? {});
+  const idp = createFakeIdpClient(opts.idp ?? {});
   const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
   return { app, people, publisher, idp };
 };
@@ -41,9 +41,9 @@ const url = (path: string) => `http://localhost/api/v1${path}`;
 
 // ─── PUT /people/:id — sincronizacao de perfil com o IdP ────────
 
-describe("PUT /api/v1/people/:personId — sync de perfil no Authentik", () => {
-  const withLogin = async (overrides: FakeAuthentikOverrides = {}) => {
-    const ctx = setup({ idp: { createUserPk: 55, createUserUid: "uid-55", ...overrides } });
+describe("PUT /api/v1/people/:personId — sync de perfil no IdP", () => {
+  const withLogin = async (overrides: FakeIdpOverrides = {}) => {
+    const ctx = setup({ idp: { createUserId: "id-55", ...overrides } });
     const personId = await createPerson(ctx.app, {
       fullName: "Ana Costa",
       birthDate: "1990-05-15",
@@ -65,7 +65,7 @@ describe("PUT /api/v1/people/:personId — sync de perfil no Authentik", () => {
 
     expect(res.status).toBe(204);
     expect(idp.calls.updateUserProfile.length).toBe(1);
-    expect(idp.calls.updateUserProfile[0]!.pk).toBe(55);
+    expect(idp.calls.updateUserProfile[0]!.id).toBe("id-55");
     expect(idp.calls.updateUserProfile[0]!.name).toBe("Ana Nova");
   });
 
@@ -140,7 +140,7 @@ describe("PUT /api/v1/people/:personId — sync de perfil no Authentik", () => {
 describe("POST /api/v1/people/:personId/login — login retroativo", () => {
   it("provisiona login para pessoa sem login usando o email do cadastro", async () => {
     const { app, people, publisher, idp } = setup({
-      idp: { createUserPk: 88, createUserUid: "uid-88" },
+      idp: { createUserId: "id-88" },
     });
     const personId = await createPerson(app, {
       fullName: "Bruno Lima",
@@ -153,13 +153,12 @@ describe("POST /api/v1/people/:personId/login — login retroativo", () => {
     expect(res.status).toBe(201);
     expect(idp.calls.createUser.length).toBe(1);
     const stored = await people.findById(personId);
-    expect(stored?.idpUserPk).toBe(88);
-    expect(stored?.idpUserId).toBe("uid-88");
+    expect(stored?.idpUserId).toBe("id-88");
     expect(publisher.published.map((p) => p.subject)).toContain("people.user.provisioned");
   });
 
   it("aceita email e senha no body (override) ", async () => {
-    const { app, idp } = setup({ idp: { createUserPk: 89 } });
+    const { app, idp } = setup({ idp: { createUserId: "id-89" } });
     const personId = await createPerson(app, { fullName: "Sem Email", birthDate: "2000-01-01" });
 
     const res = await app.handle(
@@ -170,11 +169,13 @@ describe("POST /api/v1/people/:personId/login — login retroativo", () => {
     );
 
     expect(res.status).toBe(201);
-    expect(idp.calls.setPassword[0]?.pk).toBe(89);
+    // A senha vai direto no createUser (credentials do Kratos), nao em setPassword.
+    expect(idp.calls.createUser[0]?.password).toBe("Secret123!");
+    expect(idp.calls.createUser[0]?.email).toBe("novo@example.com");
   });
 
   it("retorna 409 quando a pessoa ja tem login", async () => {
-    const { app } = setup({ idp: { createUserPk: 90 } });
+    const { app } = setup({ idp: { createUserId: "id-90" } });
     const personId = await createPerson(app, {
       fullName: "Com Login",
       birthDate: "2000-01-01",
@@ -229,7 +230,7 @@ describe("POST /api/v1/people/:personId/login — login retroativo", () => {
     expect(body.error.code).toBe("IDP-001");
     expect(body.error.message).not.toContain("idp down");
     const stored = await people.findById(personId);
-    expect(stored?.idpUserPk).toBeNull();
+    expect(stored?.idpUserId).toBeNull();
   });
 });
 
@@ -238,9 +239,9 @@ describe("POST /api/v1/people/:personId/login — login retroativo", () => {
 describe("DELETE /api/v1/people/:personId — erasure", () => {
   const superadmin = () => createFakeAuthGuardWithRoles(["superadmin"]);
 
-  const withLogin = async (overrides: FakeAuthentikOverrides = {}) => {
+  const withLogin = async (overrides: FakeIdpOverrides = {}) => {
     const ctx = setup({
-      idp: { createUserPk: 33, createUserUid: "uid-33", ...overrides },
+      idp: { createUserId: "id-33", ...overrides },
       guard: superadmin(),
     });
     const personId = await createPerson(ctx.app, {
@@ -259,7 +260,7 @@ describe("DELETE /api/v1/people/:personId — erasure", () => {
     const res = await app.handle(new Request(url(`/people/${personId}`), { method: "DELETE" }));
 
     expect(res.status).toBe(204);
-    expect(idp.calls.deleteUser).toEqual([33]);
+    expect(idp.calls.deleteUser).toEqual(["id-33"]);
     expect(await people.findById(personId)).toBeNull();
     expect(publisher.published.map((p) => p.subject)).toContain("people.person.deleted");
   });

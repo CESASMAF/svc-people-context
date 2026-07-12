@@ -5,8 +5,8 @@ import { createRolesRoutes } from "../../src/routes/roles.ts";
 import { createFakePersonRepository, createFakeRoleRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard, createFakeAuthGuardWithRoles } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
-import { createNoopAuthentikClient } from "../../src/idp/index.ts";
-import { createFakeAuthentikClient } from "./fake-authentik.ts";
+import { createNoopIdpClient } from "../../src/idp/index.ts";
+import { createFakeIdpClient } from "./fake-idp.ts";
 import { parseJson, dataAs, dataAsArray, type IdData, type RoleData } from "./test-types.ts";
 
 const setup = (guardRoles?: string[], guardSub?: string) => {
@@ -16,7 +16,7 @@ const setup = (guardRoles?: string[], guardSub?: string) => {
     ? createFakeAuthGuardWithRoles(guardRoles, guardSub)
     : createFakeAuthGuardWithRoles(["superadmin"]);
   const publisher = createFakePublisher();
-  const idp = createNoopAuthentikClient();
+  const idp = createNoopIdpClient();
   // People routes use a permissive guard so createPerson helper works
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
@@ -30,7 +30,7 @@ const setupWithFakeIdp = (guardRoles: string[], guardSub = "test-user") => {
   const roles = createFakeRoleRepository();
   const guard = createFakeAuthGuardWithRoles(guardRoles, guardSub);
   const publisher = createFakePublisher();
-  const idp = createFakeAuthentikClient();
+  const idp = createFakeIdpClient();
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
     .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
@@ -401,7 +401,7 @@ describe("Role assignment — self-assignment prevention", () => {
     const { app, people } = setup(["social-care:admin"], "idp-user-123");
     // Create person and link idpUserId to match the caller's sub
     const personId = await createPerson(app);
-    await people.setIdpUserId(personId, "idp-user-123", 100, "test@test.com");
+    await people.setIdpUserId(personId, "idp-user-123", "test@test.com");
 
     const res = await app.handle(
       new Request(
@@ -417,7 +417,7 @@ describe("Role assignment — self-assignment prevention", () => {
   it("superadmin can assign roles to themselves", async () => {
     const { app, people } = setup(["superadmin"], "superadmin-user");
     const personId = await createPerson(app);
-    await people.setIdpUserId(personId, "superadmin-user", 101, "super@test.com");
+    await people.setIdpUserId(personId, "superadmin-user", "super@test.com");
 
     const res = await app.handle(
       new Request(
@@ -486,7 +486,7 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     const guard = createFakeAuthGuardWithRoles(["social-care:admin"]);
     const peopleGuard = createFakeAuthGuard();
     const publisher = createFakePublisher();
-    const idp = createNoopAuthentikClient();
+    const idp = createNoopIdpClient();
     const people = createFakePersonRepository();
     const app = new Elysia()
       .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
@@ -502,10 +502,10 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     expect(body.error.code).toBe("ROL-007");
   });
 
-  it("sincroniza remocao no Authentik quando pessoa tem idpUserPk", async () => {
+  it("sincroniza remocao no IdP quando pessoa tem idpUserId", async () => {
     const { app, people, idp } = setupWithFakeIdp(["superadmin"]);
     const personId = await createPerson(app);
-    await people.setIdpUserId(personId, "uid-1", 200, "x@y.com");
+    await people.setIdpUserId(personId, "id-200", "x@y.com");
     const roleId = await assignRole(app, personId, "social-care", "worker");
     idp.calls.removeUserFromGroup.length = 0;
 
@@ -516,10 +516,10 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     );
     expect(res.status).toBe(204);
     expect(idp.calls.removeUserFromGroup.length).toBe(1);
-    expect(idp.calls.removeUserFromGroup[0]!.userPk).toBe(200);
+    expect(idp.calls.removeUserFromGroup[0]!.id).toBe("id-200");
   });
 
-  it("nao sincroniza Authentik quando pessoa nao tem idpUserPk", async () => {
+  it("nao sincroniza IdP quando pessoa nao tem idpUserId", async () => {
     const { app, idp } = setupWithFakeIdp(["superadmin"]);
     const personId = await createPerson(app);
     const roleId = await assignRole(app, personId, "social-care", "worker");
@@ -561,7 +561,7 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     const guard = createFakeAuthGuardWithRoles(["social-care:admin"]);
     const peopleGuard = createFakeAuthGuard();
     const publisher = createFakePublisher();
-    const idp = createNoopAuthentikClient();
+    const idp = createNoopIdpClient();
     const people = createFakePersonRepository();
     const app = new Elysia()
       .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
@@ -577,10 +577,10 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     expect(body.error.code).toBe("ROL-007");
   });
 
-  it("sincroniza re-atribuicao no Authentik quando pessoa tem idpUserPk", async () => {
+  it("sincroniza re-atribuicao no IdP quando pessoa tem idpUserId", async () => {
     const { app, people, idp } = setupWithFakeIdp(["superadmin"]);
     const personId = await createPerson(app);
-    await people.setIdpUserId(personId, "uid-1", 300, "x@y.com");
+    await people.setIdpUserId(personId, "id-300", "x@y.com");
     const roleId = await assignRole(app, personId, "social-care", "worker");
     await app.handle(
       new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
@@ -596,6 +596,6 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     );
     expect(res.status).toBe(204);
     expect(idp.calls.addUserToGroup.length).toBe(1);
-    expect(idp.calls.addUserToGroup[0]!.userPk).toBe(300);
+    expect(idp.calls.addUserToGroup[0]!.id).toBe("id-300");
   });
 });

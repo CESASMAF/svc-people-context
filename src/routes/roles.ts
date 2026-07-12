@@ -3,7 +3,7 @@ import type { PersonRepository } from "../repository/person-repository.ts";
 import type { RoleRepository } from "../repository/role-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
 import type { EventPublisher } from "../events/publisher.ts";
-import type { AuthentikClient } from "../idp/index.ts";
+import type { IdpClient } from "../idp/index.ts";
 import { events } from "../events/publisher.ts";
 import { validateAssignRole } from "../domain/index.ts";
 import { syncRoleAssignment, syncRoleRemoval } from "../application/index.ts";
@@ -23,7 +23,7 @@ interface RolesRouteDeps {
   readonly roles: RoleRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
-  readonly idp: AuthentikClient;
+  readonly idp: IdpClient;
 }
 
 export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: RolesRouteDeps) =>
@@ -31,7 +31,10 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     .post(
       "/people/:personId/roles",
       async ({ params, body, headers, set }) => {
-        const auth = await guard(headers, ["admin"]);
+        const auth = await guard(headers, ["admin"], true, {
+          resource: "person",
+          action: "assign-role",
+        });
         if (auth.kind !== "ok") {
           set.status = auth.status;
           return auth.response;
@@ -108,11 +111,11 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
         );
 
         // Sincroniza role com Authentik se pessoa tem login.
-        if (person.idpUserPk !== null) {
+        if (person.idpUserId !== null) {
           await syncRoleAssignment(idp, {
             system: body.system,
             role: body.role,
-            idpUserPk: person.idpUserPk,
+            idpUserId: person.idpUserId,
             personId: params.personId,
           });
         }
@@ -129,7 +132,10 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     )
 
     .get("/people/:personId/roles", async ({ headers, params, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
+      const auth = await guard(headers, ["worker", "owner", "admin"], false, {
+        resource: "person",
+        action: "read",
+      }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -155,7 +161,10 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .put("/people/:personId/roles/:roleId/deactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "remove-role",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -209,11 +218,11 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
       );
 
       // Remove user do group correspondente no Authentik
-      if (person?.idpUserPk != null) {
+      if (person?.idpUserId != null) {
         await syncRoleRemoval(idp, {
           system: deactivated.system,
           role: deactivated.role,
-          idpUserPk: person.idpUserPk,
+          idpUserId: person.idpUserId,
           personId: params.personId,
         });
       }
@@ -222,7 +231,10 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .put("/people/:personId/roles/:roleId/reactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "assign-role",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -275,11 +287,11 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
       );
 
       // Re-adicionar ao group correspondente no Authentik
-      if (person?.idpUserPk != null) {
+      if (person?.idpUserId != null) {
         await syncRoleAssignment(idp, {
           system: reactivated.system,
           role: reactivated.role,
-          idpUserPk: person.idpUserPk,
+          idpUserId: person.idpUserId,
           personId: params.personId,
         });
       }
@@ -288,7 +300,10 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .get("/roles", async ({ headers, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
+      const auth = await guard(headers, ["worker", "owner", "admin"], false, {
+        resource: "person",
+        action: "read",
+      }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;

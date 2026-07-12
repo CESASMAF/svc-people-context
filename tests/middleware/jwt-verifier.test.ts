@@ -4,20 +4,19 @@ import { generateKeyPair, exportJWK, SignJWT, type JWK } from "jose";
 // ─── Configura o env ANTES de importar jwt.ts/env.ts ────────────
 //
 // jwt.ts e env.ts nao sao carregados por nenhum outro teste (rotas usam
-// fake-auth), entao o import dinamico abaixo avalia env.ts com ESTAS vars.
-// Usamos a DERIVACAO (AUTHENTIK_URL + slug) — o caminho real de producao —
-// em vez dos overrides explicitos.
+// fake-idp), entao o import dinamico abaixo avalia env.ts com ESTAS vars.
+// IdP = Ory Hydra: issuer = auth.<domain> (sem path de slug), JWKS explicito.
 process.env["NODE_ENV"] = "test";
-process.env["AUTHENTIK_URL"] = "https://authentik.test";
-process.env["AUTHENTIK_TOKEN"] = "mgmt-token";
-process.env["AUTHENTIK_APP_SLUG"] = "people-context";
+process.env["OIDC_ISSUER"] = "https://auth.test";
+process.env["JWKS_URL"] = "https://auth.test/.well-known/jwks.json";
 process.env["OIDC_AUDIENCE"] = "people-context-client";
 process.env["OIDC_ROLES_CLAIM"] = "groups";
 process.env["ALLOWED_SERVICE_ACCOUNTS"] = "svc-sub-1";
+process.env["OIDC_INTROSPECT_URL"] = "https://auth.test/introspect/";
 process.env["OIDC_INTROSPECT_CLIENT_ID"] = "introspect-client";
 process.env["OIDC_INTROSPECT_CLIENT_SECRET"] = "introspect-secret";
 
-const ISSUER = "https://authentik.test/application/o/people-context/";
+const ISSUER = "https://auth.test";
 const AUDIENCE = "people-context-client";
 const KID = "test-key-1";
 
@@ -75,7 +74,7 @@ beforeAll(async () => {
   originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes("/jwks/")) return jwksResponder();
+    if (url.includes("jwks")) return jwksResponder();
     if (url.includes("/introspect/")) return introspectResponder();
     throw new Error(`fetch inesperado no teste: ${url}`);
   }) as typeof globalThis.fetch;
@@ -96,7 +95,7 @@ beforeEach(() => {
 
 // ─── createJwtVerifier ──────────────────────────────────────────
 
-describe("createJwtVerifier (Authentik OIDC, RS256 real)", () => {
+describe("createJwtVerifier (Ory Hydra OIDC, RS256 real)", () => {
   it("extrai roles do claim `groups` de um token valido", async () => {
     const verify = createJwtVerifier();
     const token = await makeToken({
