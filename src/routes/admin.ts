@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
-import type { AuthentikClient } from "../idp/index.ts";
+import type { IdpClient } from "../idp/index.ts";
 import { reconcileIdpState, type ReconcilablePerson } from "../application/index.ts";
 
 const timestamp = () => new Date().toISOString();
@@ -11,7 +11,7 @@ const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r 
 interface AdminRouteDeps {
   readonly people: PersonRepository;
   readonly guard: AuthGuard;
-  readonly idp: AuthentikClient;
+  readonly idp: IdpClient;
 }
 
 export const createAdminRoutes = ({ people, guard, idp }: AdminRouteDeps) =>
@@ -22,7 +22,10 @@ export const createAdminRoutes = ({ people, guard, idp }: AdminRouteDeps) =>
     // IdP-first sem rollback pode deixar (AppSec HIGH-5). Operacao de
     // manutencao → restrita a superadmin. Pode ser disparada por cron externo.
     .post("/reconcile-idp", async ({ headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "reconcile",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -39,8 +42,8 @@ export const createAdminRoutes = ({ people, guard, idp }: AdminRouteDeps) =>
       const persons = await people.listWithIdpUser();
       const reconcilable: ReconcilablePerson[] = [];
       for (const p of persons) {
-        if (p.idpUserPk !== null) {
-          reconcilable.push({ id: p.id, idpUserPk: p.idpUserPk, active: p.active });
+        if (p.idpUserId !== null) {
+          reconcilable.push({ id: p.id, idpUserId: p.idpUserId, active: p.active });
         }
       }
 

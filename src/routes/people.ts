@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
 import type { EventPublisher } from "../events/publisher.ts";
-import type { AuthentikClient } from "../idp/index.ts";
+import type { IdpClient } from "../idp/index.ts";
 import { events } from "../events/publisher.ts";
 import { validateCreatePerson, validateUpdatePerson } from "../domain/index.ts";
 import {
@@ -22,7 +22,7 @@ interface PeopleRouteDeps {
   readonly people: PersonRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
-  readonly idp: AuthentikClient;
+  readonly idp: IdpClient;
 }
 
 export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRouteDeps) =>
@@ -30,7 +30,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     .post(
       "/people",
       async ({ body, headers, set }) => {
-        const auth = await guard(headers, ["worker", "admin"]);
+        const auth = await guard(headers, ["worker", "admin"], true, {
+          resource: "person",
+          action: "create",
+        });
         if (auth.kind !== "ok") {
           set.status = auth.status;
           return auth.response;
@@ -79,11 +82,11 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
 
           if (provision.ok) {
             // Persistir uid (sub do JWT — ADR-023) + pk (mutacoes Management API, HIGH-6).
-            await people.setIdpUserId(person.id, provision.data.uid, provision.data.pk, body.email);
+            await people.setIdpUserId(person.id, provision.data.id, body.email);
             await publisher.publish(
               events.userProvisioned(auth.actorId, {
                 personId: person.id,
-                idpUserId: provision.data.uid,
+                idpUserId: provision.data.id,
               }),
             );
           } else {
@@ -116,7 +119,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     )
 
     .get("/people", async ({ headers, query, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
+      const auth = await guard(headers, ["worker", "owner", "admin"], false, {
+        resource: "person",
+        action: "read",
+      }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -143,7 +149,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     })
 
     .get("/people/by-cpf/:cpf", async ({ headers, params, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
+      const auth = await guard(headers, ["worker", "owner", "admin"], false, {
+        resource: "person",
+        action: "read",
+      }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -166,7 +175,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     })
 
     .get("/people/:personId", async ({ headers, params, set }) => {
-      const auth = await guard(headers, ["worker", "owner", "admin"], false); // GET: actorId do JWT.sub
+      const auth = await guard(headers, ["worker", "owner", "admin"], false, {
+        resource: "person",
+        action: "read",
+      }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -191,7 +203,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     .put(
       "/people/:personId",
       async ({ params, body, headers, set }) => {
-        const auth = await guard(headers, ["worker", "admin"]);
+        const auth = await guard(headers, ["worker", "admin"], true, {
+          resource: "person",
+          action: "update",
+        });
         if (auth.kind !== "ok") {
           set.status = auth.status;
           return auth.response;
@@ -229,9 +244,9 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         // Mantem o IdP em sincronia (name e, se informado, email). Best-effort
         // pos-DB: o registro local e a fonte de verdade; falha vira warning e
         // nao quebra o update (mesma politica do role-sync).
-        if (updated.idpUserPk !== null) {
+        if (updated.idpUserId !== null) {
           await syncPersonProfileToIdp(idp, {
-            idpUserPk: updated.idpUserPk,
+            idpUserId: updated.idpUserId,
             name: updated.fullName,
             email: body.email,
             personId: params.personId,
@@ -252,7 +267,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
 
     // ─── Deactivate person + Authentik user ────────────────────────
     .put("/people/:personId/deactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "deactivate",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -282,12 +300,12 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       // AppSec HIGH-5: IdP PRIMEIRO, DB depois. Sem rollback compensatorio.
       // Se DB falhar apos IdP, registro inconsistente e detectavel por
       // reconciliacao (e o IdP estar deactivated e seguro como degraded mode).
-      if (person.idpUserPk !== null) {
-        const deactivateResult = await idp.deactivateUser(person.idpUserPk);
+      if (person.idpUserId !== null) {
+        const deactivateResult = await idp.deactivateUser(person.idpUserId);
         if (!deactivateResult.ok) {
           // AppSec HIGH-7: NAO vazar Authentik message no response.
           console.warn(
-            `[idp] deactivateUser failed pk=${person.idpUserPk} code=${deactivateResult.code}`,
+            `[idp] deactivateUser failed pk=${person.idpUserId} code=${deactivateResult.code}`,
           );
           set.status = 502;
           return {
@@ -307,11 +325,11 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         };
       }
 
-      if (person.idpUserPk !== null) {
+      if (person.idpUserId !== null) {
         await publisher.publish(
           events.userDeactivated(auth.actorId, {
             personId: params.personId,
-            idpUserId: person.idpUserId ?? "",
+            idpUserId: person.idpUserId,
           }),
         );
       }
@@ -321,7 +339,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
 
     // ─── Reactivate person + Authentik user ────────────────────────
     .put("/people/:personId/reactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "reactivate",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -346,11 +367,11 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       }
 
       // AppSec HIGH-5: IdP PRIMEIRO, DB depois.
-      if (person.idpUserPk !== null) {
-        const reactivateResult = await idp.reactivateUser(person.idpUserPk);
+      if (person.idpUserId !== null) {
+        const reactivateResult = await idp.reactivateUser(person.idpUserId);
         if (!reactivateResult.ok) {
           console.warn(
-            `[idp] reactivateUser failed pk=${person.idpUserPk} code=${reactivateResult.code}`,
+            `[idp] reactivateUser failed pk=${person.idpUserId} code=${reactivateResult.code}`,
           );
           set.status = 502;
           return {
@@ -366,11 +387,11 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         return { success: false, error: { code: "PEO-006", message: "Person is already active" } };
       }
 
-      if (person.idpUserPk !== null) {
+      if (person.idpUserId !== null) {
         await publisher.publish(
           events.userReactivated(auth.actorId, {
             personId: params.personId,
-            idpUserId: person.idpUserId ?? "",
+            idpUserId: person.idpUserId,
           }),
         );
       }
@@ -382,7 +403,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     // ADR-030 + AppSec CRITICAL-2 fix: link NAO retorna no response body.
     // Apenas publica evento NATS para queue-manager montar email PT-BR.
     .post("/people/:personId/request-password-reset", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "request-password-reset",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -402,16 +426,16 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
         return { success: false, error: { code: "PEO-002", message: "Person not found" } };
       }
 
-      if (person.idpUserPk === null) {
+      if (person.idpUserId === null) {
         set.status = 422;
         return { success: false, error: { code: "PEO-007", message: "Person has no IdP login" } };
       }
 
-      const recoveryResult = await idp.requestPasswordReset(person.idpUserPk);
+      const recoveryResult = await idp.requestPasswordReset(person.idpUserId);
       if (!recoveryResult.ok) {
         // AppSec HIGH-7: nao vazar Authentik error message no response.
         console.warn(
-          `[idp] requestPasswordReset failed pk=${person.idpUserPk} code=${recoveryResult.code}`,
+          `[idp] requestPasswordReset failed pk=${person.idpUserId} code=${recoveryResult.code}`,
         );
         set.status = 502;
         return {
@@ -425,7 +449,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
       await publisher.publish(
         events.passwordResetRequested(auth.actorId, {
           personId: params.personId,
-          idpUserId: person.idpUserId ?? "",
+          idpUserId: person.idpUserId,
           recoveryLink: recoveryResult.data.link,
         }),
       );
@@ -440,7 +464,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     .post(
       "/people/:personId/login",
       async ({ params, body, headers, set }) => {
-        const auth = await guard(headers, ["worker", "admin"]);
+        const auth = await guard(headers, ["worker", "admin"], true, {
+          resource: "person",
+          action: "enable-login",
+        });
         if (auth.kind !== "ok") {
           set.status = auth.status;
           return auth.response;
@@ -460,7 +487,7 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           return { success: false, error: { code: "PEO-002", message: "Person not found" } };
         }
 
-        if (person.idpUserPk !== null) {
+        if (person.idpUserId !== null) {
           set.status = 409;
           return {
             success: false,
@@ -503,17 +530,17 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           };
         }
 
-        await people.setIdpUserId(person.id, provision.data.uid, provision.data.pk, email);
+        await people.setIdpUserId(person.id, provision.data.id, email);
         await publisher.publish(
           events.userProvisioned(auth.actorId, {
             personId: person.id,
-            idpUserId: provision.data.uid,
+            idpUserId: provision.data.id,
           }),
         );
 
         set.status = 201;
         return {
-          data: { id: person.id, idpUserId: provision.data.uid },
+          data: { id: person.id, idpUserId: provision.data.id },
           meta: { timestamp: timestamp() },
         };
       },
@@ -528,7 +555,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
     // ─── Erasure: hard-delete pessoa + Authentik user ──────────────
     // LGPD Art. 18 V (eliminacao). Irreversivel e cross-system → superadmin.
     .delete("/people/:personId", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"]);
+      const auth = await guard(headers, ["admin"], true, {
+        resource: "person",
+        action: "erase",
+      });
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -559,10 +589,10 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
 
       // AppSec HIGH-5: IdP PRIMEIRO, DB depois. Se o delete no Authentik falhar,
       // abortamos antes de tocar o DB (sem orfao no IdP).
-      if (person.idpUserPk !== null) {
-        const del = await idp.deleteUser(person.idpUserPk);
+      if (person.idpUserId !== null) {
+        const del = await idp.deleteUser(person.idpUserId);
         if (!del.ok) {
-          console.warn(`[idp] deleteUser failed pk=${person.idpUserPk} code=${del.code}`);
+          console.warn(`[idp] deleteUser failed pk=${person.idpUserId} code=${del.code}`);
           set.status = 502;
           return {
             success: false,

@@ -20,14 +20,9 @@ export interface PersonRepository {
   readonly findByCpf: (cpf: string) => Promise<Person | null>;
   readonly update: (id: string, input: UpdatePersonInput) => Promise<Person | null>;
   readonly list: (options?: ListOptions) => Promise<ListResult>;
-  // Persiste credenciais IdP do user provisionado. `idpUserUid` e o `uid`
-  // Authentik (vai pro JWT sub); `idpUserPk` e o pk integer (chamadas Management API).
-  readonly setIdpUserId: (
-    id: string,
-    idpUserUid: string,
-    idpUserPk: number,
-    email: string,
-  ) => Promise<Person | null>;
+  // Persiste o identificador IdP do user provisionado. `idpUserId` = identity.id
+  // (UUID) do Kratos, que vai no `sub` do JWT (Ory não tem pk/uid separados).
+  readonly setIdpUserId: (id: string, idpUserId: string, email: string) => Promise<Person | null>;
   readonly deactivate: (id: string) => Promise<Person | null>;
   readonly reactivate: (id: string) => Promise<Person | null>;
   // Hard-delete (erasure, LGPD Art. 18 V). Remove roles (FK sem CASCADE) e a
@@ -41,7 +36,7 @@ export const createPersonRepository = (sql: Sql): PersonRepository => {
   // Lista de colunas como fragmento Bun.sql (composável e seguro — sem `unsafe`).
   const fields = sql`
     id, full_name AS "fullName", cpf, birth_date::text AS "birthDate",
-    email, idp_user_id AS "idpUserId", idp_user_pk AS "idpUserPk", active,
+    email, idp_user_id AS "idpUserId", active,
     created_at::text AS "createdAt", updated_at::text AS "updatedAt"
   `;
 
@@ -86,11 +81,10 @@ export const createPersonRepository = (sql: Sql): PersonRepository => {
       return row ?? null;
     },
 
-    setIdpUserId: async (id, idpUserUid, idpUserPk, email) => {
+    setIdpUserId: async (id, idpUserId, email) => {
       const [row] = await sql<Person[]>`
       UPDATE people
-      SET idp_user_id = ${idpUserUid},
-          idp_user_pk = ${idpUserPk},
+      SET idp_user_id = ${idpUserId},
           email = ${email},
           updated_at = now()
       WHERE id = ${id}
@@ -134,7 +128,7 @@ export const createPersonRepository = (sql: Sql): PersonRepository => {
     listWithIdpUser: async () =>
       sql<Person[]>`
       SELECT ${fields} FROM people
-      WHERE idp_user_pk IS NOT NULL
+      WHERE idp_user_id IS NOT NULL
       ORDER BY id
     `,
 

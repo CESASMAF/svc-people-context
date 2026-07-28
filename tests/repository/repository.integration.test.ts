@@ -14,15 +14,15 @@ import type { RoleRepository } from "../../src/repository/role-repository.ts";
 
 const live = process.env["PG_INTEGRATION"] === "1";
 
-// Aponta para o Postgres de teste e neutraliza o XOR do env (Authentik) ANTES de
-// qualquer import de db.ts/env.ts (feito dinamicamente no beforeAll).
+// Aponta para o Postgres de teste ANTES de qualquer import de db.ts/env.ts (feito
+// dinamicamente no beforeAll). O IdP (Kratos) nao e tocado por estes testes.
 process.env["DB_HOST"] ??= "127.0.0.1";
 process.env["DB_PORT"] ??= "5433";
 process.env["DB_USER"] ??= "postgres";
 process.env["DB_PASSWORD"] ??= "postgres";
 process.env["DB_NAME"] ??= "people";
-delete process.env["AUTHENTIK_URL"];
-delete process.env["AUTHENTIK_TOKEN"];
+delete process.env["KRATOS_ADMIN_URL"];
+delete process.env["KRATOS_ADMIN_TOKEN"];
 
 const UUID_ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -63,7 +63,6 @@ describe.skipIf(!live)("repository integration (Postgres real)", () => {
     expect(created.cpf).toBe("11111111111");
     expect(created.active).toBe(true);
     expect(created.idpUserId).toBeNull();
-    expect(created.idpUserPk).toBeNull();
 
     const byId = await people.findById(created.id);
     expect(byId?.fullName).toBe("Ana Integration");
@@ -88,9 +87,8 @@ describe.skipIf(!live)("repository integration (Postgres real)", () => {
     expect(updated?.fullName).toBe("Bob Updated");
     expect(await people.update(UUID_ZERO, { fullName: "X", birthDate: "2000-01-01" })).toBeNull();
 
-    const idp = await people.setIdpUserId(p.id, "uid-hex-64", 4242, "bob@idp.com");
-    expect(idp?.idpUserId).toBe("uid-hex-64");
-    expect(idp?.idpUserPk).toBe(4242);
+    const idp = await people.setIdpUserId(p.id, "kratos-uuid-4242", "bob@idp.com");
+    expect(idp?.idpUserId).toBe("kratos-uuid-4242");
     expect(idp?.email).toBe("bob@idp.com");
 
     expect((await people.deactivate(p.id))?.active).toBe(false);
@@ -98,18 +96,18 @@ describe.skipIf(!live)("repository integration (Postgres real)", () => {
     expect(await people.deactivate(UUID_ZERO)).toBeNull();
   });
 
-  test("listWithIdpUser só retorna quem tem idp_user_pk", async () => {
+  test("listWithIdpUser só retorna quem tem idp_user_id", async () => {
     const withIdp = await people.create({
       fullName: "HasIdp",
       cpf: "33333333333",
       birthDate: "1991-02-02",
     });
     await people.create({ fullName: "NoIdp", cpf: "44444444444", birthDate: "1992-03-03" });
-    await people.setIdpUserId(withIdp.id, "uid-1", 1, "has@idp.com");
+    await people.setIdpUserId(withIdp.id, "kratos-uuid-1", "has@idp.com");
 
     const list = await people.listWithIdpUser();
     expect(list.map((x) => x.id)).toContain(withIdp.id);
-    expect(list.every((x) => x.idpUserPk !== null)).toBe(true);
+    expect(list.every((x) => x.idpUserId !== null)).toBe(true);
   });
 
   test("list: paginação por cursor + busca + totalCount", async () => {

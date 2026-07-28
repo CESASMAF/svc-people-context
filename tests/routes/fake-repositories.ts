@@ -19,7 +19,6 @@ export const createFakePersonRepository = (): PersonRepository & {
         birthDate: input.birthDate,
         email: input.email ?? null,
         idpUserId: null,
-        idpUserPk: null,
         active: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -53,13 +52,12 @@ export const createFakePersonRepository = (): PersonRepository & {
       return updated;
     },
 
-    setIdpUserId: async (id, idpUserUid, idpUserPk, email) => {
+    setIdpUserId: async (id, idpUserId, email) => {
       const existing = store.get(id);
       if (!existing) return null;
       const updated: Person = {
         ...existing,
-        idpUserId: idpUserUid,
-        idpUserPk,
+        idpUserId,
         email,
         updatedAt: new Date().toISOString(),
       };
@@ -85,7 +83,7 @@ export const createFakePersonRepository = (): PersonRepository & {
 
     remove: async (id) => store.delete(id),
 
-    listWithIdpUser: async () => [...store.values()].filter((p) => p.idpUserPk !== null),
+    listWithIdpUser: async () => [...store.values()].filter((p) => p.idpUserId !== null),
 
     list: async (options = {}) => {
       let items = [...store.values()];

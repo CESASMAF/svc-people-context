@@ -1,52 +1,68 @@
 import type {
-  AuthentikClient,
-  AuthentikGroupPk,
-  AuthentikResult,
-  AuthentikUserPk,
-  CreateServiceAccountInput,
-  CreateUserInput,
-  GroupSummary,
-  RecoveryLinkResponse,
-  ServiceAccountResponse,
-  UpdateUserProfileInput,
-  UserResponse,
   ACDGUserAttributes,
+  CreateUserInput,
+  IdpClient,
+  IdpResult,
+  IdpUser,
+  IdpUserId,
+  RecoveryLinkResponse,
+  UpdateUserProfileInput,
 } from "./types.ts";
 
 // ─── Config ────────────────────────────────────────────────────
+//
+// A Admin API do Kratos (:4434) NÃO exige autenticação — a proteção é a isolação
+// de rede (malha `internal`). `token` é opcional: só é enviado se um proxy com
+// Bearer for posto na frente do Admin (defesa-em-profundidade — follow-up).
 
-interface AuthentikClientConfig {
+interface IdpClientConfig {
   readonly baseUrl: string;
-  readonly token: string;
+  readonly token?: string;
+}
+
+// ─── Kratos identity (shape mínimo que consumimos) ─────────────
+
+interface KratosIdentity {
+  readonly id: string;
+  readonly schema_id: string;
+  readonly state: "active" | "inactive";
+  readonly traits: { readonly email?: string; readonly name?: string };
+  readonly metadata_public?: Record<string, unknown> | null;
+  readonly created_at?: string;
+}
+
+// Corpo do PUT /admin/identities/{id} (AdminUpdateIdentityBody).
+interface KratosUpdateBody {
+  readonly schema_id: string;
+  readonly state: "active" | "inactive";
+  readonly traits: Record<string, unknown>;
+  readonly metadata_public: Record<string, unknown>;
+  readonly credentials?: { readonly password: { readonly config: { readonly password: string } } };
 }
 
 // ─── HTTP helper (never throws — boundary do Result) ───────────
 //
-// try/catch existe APENAS aqui (boundary infra). Toda funcao publica
-// devolve Result<T, E> em vez de propagar excecao. Conforme ADR-014
-// (Result pattern end-to-end) e regra do CLAUDE.md.
+// try/catch existe APENAS aqui (boundary infra). Toda funcao publica devolve
+// Result<T, E> em vez de propagar excecao. Conforme ADR-014 e regra do CLAUDE.md.
 
 const request = async <T>(
-  config: AuthentikClientConfig,
+  config: IdpClientConfig,
   method: string,
   path: string,
   body?: unknown,
-): Promise<AuthentikResult<T>> => {
+): Promise<IdpResult<T>> => {
   try {
     const response = await fetch(`${config.baseUrl}${path}`, {
       method,
       headers: {
-        Authorization: `Bearer ${config.token}`,
+        ...(config.token !== undefined ? { Authorization: `Bearer ${config.token}` } : {}),
         "Content-Type": "application/json",
         Accept: "application/json",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-    // 204 No Content: caller deve usar T = undefined. Code-review HIGH-5:
-    // restringe ao status 204 estritamente (nao confundir com 200 body vazio).
-    // O cast `as T` e necessario porque o protocolo HTTP nao tem como expressar
-    // "this response carries no body" no nivel de tipos do fetch.
+    // 204 No Content: caller usa T = undefined.
     if (response.status === 204) {
       return { ok: true, data: undefined as T };
     }
@@ -60,11 +76,10 @@ const request = async <T>(
     let message: string;
     try {
       const parsed = JSON.parse(errorBody) as {
-        detail?: string;
-        error?: string;
-        error_description?: string;
+        error?: { message?: string; reason?: string };
+        message?: string;
       };
-      message = parsed.detail ?? parsed.error_description ?? parsed.error ?? errorBody;
+      message = parsed.error?.reason ?? parsed.error?.message ?? parsed.message ?? errorBody;
     } catch {
       message = errorBody;
     }
@@ -79,188 +94,220 @@ const request = async <T>(
   }
 };
 
-// ─── DRF paginated response ────────────────────────────────────
+// ─── Mapeamento identity → IdpUser ─────────────────────────────
 
-interface PaginatedResponse<T> {
-  readonly results: readonly T[];
-  readonly pagination: { readonly count: number };
-}
+const asStringArray = (v: unknown): readonly string[] =>
+  Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+
+const mapIdentity = (id: KratosIdentity): IdpUser => {
+  const md = (id.metadata_public ?? {}) as Record<string, unknown>;
+  // separa `groups`/`username` do restante (= atributos ACDG)
+  const { groups, username, ...attributes } = md;
+  return {
+    id: id.id,
+    username: typeof username === "string" ? username : "",
+    name: id.traits.name ?? "",
+    email: id.traits.email ?? "",
+    active: id.state === "active",
+    groups: asStringArray(groups),
+    attributes: attributes as ACDGUserAttributes,
+    createdAt: id.created_at ?? "",
+  };
+};
+
+// Corpo base do PUT a partir da identity atual (preserva o que não muda).
+const baseBody = (id: KratosIdentity): KratosUpdateBody => ({
+  schema_id: id.schema_id,
+  state: id.state,
+  traits: { ...id.traits },
+  metadata_public: { ...(id.metadata_public ?? {}) },
+});
 
 // ─── Factory ───────────────────────────────────────────────────
 
-export const createAuthentikClient = (config: AuthentikClientConfig): AuthentikClient => ({
-  // ── Users ────────────────────────────────────────────────────
-
-  createUser: async (input: CreateUserInput) =>
-    request<UserResponse>(config, "POST", "/api/v3/core/users/", {
-      username: input.username,
-      name: input.name,
-      email: input.email,
-      is_active: input.is_active ?? true,
-      path: input.path ?? "users",
-      type: input.type ?? "internal",
-      groups: input.groups ?? [],
-      attributes: input.attributes ?? {},
-    }),
-
-  getUser: async (userPk: AuthentikUserPk) =>
-    request<UserResponse>(config, "GET", `/api/v3/core/users/${userPk}/`),
-
-  findUserByUsername: async (username: string) => {
-    const result = await request<PaginatedResponse<UserResponse>>(
+export const createIdpClient = (config: IdpClientConfig): IdpClient => {
+  // GET a identity, aplica `mutate` e faz PUT (read-modify-write).
+  const modify = async (
+    id: IdpUserId,
+    mutate: (current: KratosIdentity) => KratosUpdateBody,
+  ): Promise<IdpResult<IdpUser>> => {
+    const got = await request<KratosIdentity>(config, "GET", `/admin/identities/${id}`);
+    if (!got.ok) return got;
+    const put = await request<KratosIdentity>(
       config,
-      "GET",
-      `/api/v3/core/users/?username=${encodeURIComponent(username)}`,
+      "PUT",
+      `/admin/identities/${id}`,
+      mutate(got.data),
     );
-    if (!result.ok) return result;
-    const first = result.data.results[0];
-    return { ok: true as const, data: first ?? null };
-  },
+    if (!put.ok) return put;
+    return { ok: true, data: mapIdentity(put.data) };
+  };
 
-  findUserByUid: async (uid) => {
-    const result = await request<PaginatedResponse<UserResponse>>(
-      config,
-      "GET",
-      `/api/v3/core/users/?uid=${encodeURIComponent(uid)}`,
-    );
+  const setState = async (
+    id: IdpUserId,
+    state: "active" | "inactive",
+  ): Promise<IdpResult<undefined>> => {
+    const result = await modify(id, (cur) => ({ ...baseBody(cur), state }));
     if (!result.ok) return result;
-    const first = result.data.results[0];
-    return { ok: true as const, data: first ?? null };
-  },
+    return { ok: true, data: undefined };
+  };
 
-  // Code-review HIGH-18: descartamos qualquer body que o Authentik possa
-  // retornar (algumas versoes retornam {}). Tipo void e garantido aqui.
-  setPassword: async (userPk: AuthentikUserPk, password: string) => {
-    const result = await request<unknown>(
-      config,
-      "POST",
-      `/api/v3/core/users/${userPk}/set_password/`,
-      { password },
-    );
-    if (!result.ok) return result;
-    return { ok: true as const, data: undefined };
-  },
-
-  deactivateUser: async (userPk: AuthentikUserPk) => {
-    const result = await request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
-      is_active: false,
+  const setGroups = async (
+    id: IdpUserId,
+    reduce: (current: readonly string[]) => readonly string[],
+  ): Promise<IdpResult<undefined>> => {
+    const result = await modify(id, (cur) => {
+      const md = (cur.metadata_public ?? {}) as Record<string, unknown>;
+      const next = [...new Set(reduce(asStringArray(md.groups)))];
+      return { ...baseBody(cur), metadata_public: { ...md, groups: next } };
     });
     if (!result.ok) return result;
-    return { ok: true as const, data: undefined };
-  },
+    return { ok: true, data: undefined };
+  };
 
-  reactivateUser: async (userPk: AuthentikUserPk) => {
-    const result = await request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
-      is_active: true,
-    });
-    if (!result.ok) return result;
-    return { ok: true as const, data: undefined };
-  },
+  return {
+    // ── Users ────────────────────────────────────────────────────
+    createUser: async (input: CreateUserInput) =>
+      request<KratosIdentity>(config, "POST", "/admin/identities", {
+        schema_id: "person_v1",
+        state: input.is_active === false ? "inactive" : "active",
+        traits: { email: input.email, name: input.name },
+        metadata_public: {
+          groups: input.groups ?? [],
+          username: input.username,
+          ...(input.attributes ?? {}),
+        },
+        ...(input.password !== undefined && input.password !== ""
+          ? { credentials: { password: { config: { password: input.password } } } }
+          : {}),
+      }).then((r) => (r.ok ? { ok: true as const, data: mapIdentity(r.data) } : r)),
 
-  deleteUser: async (userPk: AuthentikUserPk) =>
-    request<undefined>(config, "DELETE", `/api/v3/core/users/${userPk}/`),
+    getUser: async (id: IdpUserId) =>
+      request<KratosIdentity>(config, "GET", `/admin/identities/${id}`).then((r) =>
+        r.ok ? { ok: true as const, data: mapIdentity(r.data) } : r,
+      ),
 
-  updateUserAttributes: async (userPk: AuthentikUserPk, attributes: ACDGUserAttributes) =>
-    request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, { attributes }),
+    findUserByEmail: async (email: string) => {
+      const result = await request<KratosIdentity[]>(
+        config,
+        "GET",
+        `/admin/identities?credentials_identifier=${encodeURIComponent(email)}`,
+      );
+      if (!result.ok) return result;
+      const first = result.data[0];
+      return { ok: true as const, data: first !== undefined ? mapIdentity(first) : null };
+    },
 
-  // PATCH parcial: monta o body apenas com os campos presentes no patch,
-  // evitando sobrescrever name/email/attributes com undefined no Authentik.
-  updateUserProfile: async (userPk: AuthentikUserPk, patch: UpdateUserProfileInput) =>
-    request<UserResponse>(config, "PATCH", `/api/v3/core/users/${userPk}/`, {
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.email !== undefined ? { email: patch.email } : {}),
-      ...(patch.attributes !== undefined ? { attributes: patch.attributes } : {}),
-    }),
+    // Kratos não tem endpoint dedicado: PUT com credentials substitui a senha
+    // (preserva traits/metadata/state via read-modify-write). Usado só no
+    // provision de um user novo (sem TOTP) — seguro.
+    setPassword: async (id: IdpUserId, password: string) => {
+      const got = await request<KratosIdentity>(config, "GET", `/admin/identities/${id}`);
+      if (!got.ok) return got;
+      const put = await request<KratosIdentity>(config, "PUT", `/admin/identities/${id}`, {
+        ...baseBody(got.data),
+        credentials: { password: { config: { password } } },
+      });
+      if (!put.ok) return put;
+      return { ok: true as const, data: undefined };
+    },
 
-  // ── Recovery ─────────────────────────────────────────────────
+    deactivateUser: async (id: IdpUserId) => setState(id, "inactive"),
 
-  requestPasswordReset: async (userPk: AuthentikUserPk) =>
-    request<RecoveryLinkResponse>(config, "POST", `/api/v3/core/users/${userPk}/recovery/`, {}),
+    reactivateUser: async (id: IdpUserId) => setState(id, "active"),
 
-  // ── Groups ───────────────────────────────────────────────────
+    deleteUser: async (id: IdpUserId) =>
+      request<undefined>(config, "DELETE", `/admin/identities/${id}`),
 
-  findGroupByName: async (name: string) => {
-    const result = await request<PaginatedResponse<GroupSummary>>(
-      config,
-      "GET",
-      `/api/v3/core/groups/?name=${encodeURIComponent(name)}`,
-    );
-    if (!result.ok) return result;
-    const first = result.data.results[0];
-    return { ok: true as const, data: first ?? null };
-  },
+    updateUserAttributes: async (id: IdpUserId, attributes: ACDGUserAttributes) =>
+      modify(id, (cur) => {
+        const md = (cur.metadata_public ?? {}) as Record<string, unknown>;
+        // preserva `groups`/`username`; sobrescreve só os atributos ACDG.
+        return {
+          ...baseBody(cur),
+          metadata_public: {
+            ...attributes,
+            ...(md.groups !== undefined ? { groups: md.groups } : {}),
+            ...(md.username !== undefined ? { username: md.username } : {}),
+          },
+        };
+      }),
 
-  addUserToGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/add_user/`, { pk: userPk }),
+    updateUserProfile: async (id: IdpUserId, patch: UpdateUserProfileInput) =>
+      modify(id, (cur) => ({
+        ...baseBody(cur),
+        traits: {
+          ...cur.traits,
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.email !== undefined ? { email: patch.email } : {}),
+        },
+        ...(patch.attributes !== undefined
+          ? {
+              metadata_public: {
+                ...(cur.metadata_public ?? {}),
+                ...patch.attributes,
+              },
+            }
+          : {}),
+      })),
 
-  removeUserFromGroup: async (groupPk: AuthentikGroupPk, userPk: AuthentikUserPk) =>
-    request<undefined>(config, "POST", `/api/v3/core/groups/${groupPk}/remove_user/`, {
-      pk: userPk,
-    }),
+    // ── Recovery ─────────────────────────────────────────────────
+    requestPasswordReset: async (id: IdpUserId) => {
+      const r = await request<{ recovery_link: string }>(config, "POST", "/admin/recovery/link", {
+        identity_id: id,
+      });
+      if (!r.ok) return r;
+      return {
+        ok: true as const,
+        data: { link: r.data.recovery_link } satisfies RecoveryLinkResponse,
+      };
+    },
 
-  listUserGroups: async (userPk: AuthentikUserPk) => {
-    type UserWithGroups = UserResponse & {
-      readonly groups_obj: readonly GroupSummary[];
-    };
-    const result = await request<UserWithGroups>(
-      config,
-      "GET",
-      `/api/v3/core/users/${userPk}/?include_groups=true`,
-    );
-    if (!result.ok) return result;
-    return { ok: true as const, data: result.data.groups_obj };
-  },
+    // ── Roles (metadata_public.groups) ──────────────────────────
+    addUserToGroup: async (group: string, id: IdpUserId) => setGroups(id, (cur) => [...cur, group]),
 
-  // ── Service Account (M2M) ────────────────────────────────────
+    removeUserFromGroup: async (group: string, id: IdpUserId) =>
+      setGroups(id, (cur) => cur.filter((g) => g !== group)),
 
-  createServiceAccount: async (input: CreateServiceAccountInput) =>
-    request<ServiceAccountResponse>(config, "POST", "/api/v3/core/users/service_account/", {
-      name: input.name,
-      create_group: input.create_group ?? false,
-      expiring: input.expiring ?? true,
-      ...(input.expires !== undefined ? { expires: input.expires } : {}),
-    }),
-});
+    listUserGroups: async (id: IdpUserId) => {
+      const r = await request<KratosIdentity>(config, "GET", `/admin/identities/${id}`);
+      if (!r.ok) return r;
+      return { ok: true as const, data: asStringArray(r.data.metadata_public?.groups) };
+    },
+  };
+};
 
 // ─── Noop client (testes ou IdP desabilitado) ───────────────────
 
-export const createNoopAuthentikClient = (): AuthentikClient => {
-  const stubUser = (overrides: Partial<UserResponse> = {}): UserResponse => ({
-    pk: 0,
-    uid: "noop-" + crypto.randomUUID(),
+export const createNoopIdpClient = (): IdpClient => {
+  const stub = (overrides: Partial<IdpUser> = {}): IdpUser => ({
+    id: "noop-" + crypto.randomUUID(),
     username: "noop",
     name: "Noop User",
     email: "noop@example.invalid",
-    is_active: true,
-    is_superuser: false,
+    active: true,
     groups: [],
     attributes: {},
-    date_joined: new Date().toISOString(),
-    last_login: null,
+    createdAt: new Date().toISOString(),
     ...overrides,
   });
 
   return {
     createUser: async (input) => ({
       ok: true,
-      data: stubUser({
-        username: input.username,
-        name: input.name,
-        email: input.email,
-      }),
+      data: stub({ username: input.username, name: input.name, email: input.email }),
     }),
-    getUser: async (pk) => ({ ok: true, data: stubUser({ pk }) }),
-    findUserByUsername: async () => ({ ok: true, data: null }),
-    findUserByUid: async () => ({ ok: true, data: null }),
+    getUser: async (id) => ({ ok: true, data: stub({ id }) }),
+    findUserByEmail: async () => ({ ok: true, data: null }),
     setPassword: async () => ({ ok: true, data: undefined }),
     deactivateUser: async () => ({ ok: true, data: undefined }),
     reactivateUser: async () => ({ ok: true, data: undefined }),
     deleteUser: async () => ({ ok: true, data: undefined }),
-    updateUserAttributes: async (pk) => ({ ok: true, data: stubUser({ pk }) }),
-    updateUserProfile: async (pk, patch) => ({
+    updateUserAttributes: async (id) => ({ ok: true, data: stub({ id }) }),
+    updateUserProfile: async (id, patch) => ({
       ok: true,
-      data: stubUser({
-        pk,
+      data: stub({
+        id,
         name: patch.name ?? "Noop User",
         email: patch.email ?? "noop@example.invalid",
       }),
@@ -269,18 +316,8 @@ export const createNoopAuthentikClient = (): AuthentikClient => {
       ok: true,
       data: { link: "https://noop.invalid/recovery/?token=noop" },
     }),
-    findGroupByName: async () => ({ ok: true, data: null }),
     addUserToGroup: async () => ({ ok: true, data: undefined }),
     removeUserFromGroup: async () => ({ ok: true, data: undefined }),
     listUserGroups: async () => ({ ok: true, data: [] }),
-    createServiceAccount: async (input) => ({
-      ok: true,
-      data: {
-        username: input.name,
-        token: "noop-token-" + crypto.randomUUID(),
-        user_uid: "noop-" + crypto.randomUUID(),
-        user_pk: 0,
-      },
-    }),
   };
 };

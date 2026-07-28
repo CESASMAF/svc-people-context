@@ -4,15 +4,16 @@ import { createPeopleRoutes } from "../../src/routes/people.ts";
 import { createFakePersonRepository } from "../routes/fake-repositories.ts";
 import { createRejectingAuthGuard } from "../routes/fake-auth.ts";
 import { createFakePublisher } from "../routes/fake-publisher.ts";
-import { createNoopAuthentikClient } from "../../src/idp/index.ts";
+import { createNoopIdpClient } from "../../src/idp/index.ts";
 import { createAuthGuard } from "../../src/middleware/auth.ts";
 import type { JwtVerifier } from "../../src/middleware/jwt.ts";
+import type { CerbosClient } from "../../src/middleware/cerbos.ts";
 
 const setup = () => {
   const people = createFakePersonRepository();
   const guard = createRejectingAuthGuard();
   const publisher = createFakePublisher();
-  const idp = createNoopAuthentikClient();
+  const idp = createNoopIdpClient();
   const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
   return { app };
 };
@@ -115,5 +116,73 @@ describe("Auth guard — composite role matching", () => {
       "owner",
     ]);
     expect(result.kind).toBe("ok");
+  });
+});
+
+describe("Auth guard — Cerbos (PDP) defense-in-depth", () => {
+  const fakeVerifier =
+    (roles: string[]): JwtVerifier =>
+    async () => ({ sub: "actor-1", roles });
+
+  // Cerbos que sempre devolve `decision` e registra a última chamada.
+  const fakeCerbos = (decision: boolean | null): { client: CerbosClient; calls: unknown[] } => {
+    const calls: unknown[] = [];
+    return {
+      calls,
+      client: {
+        check: async (roles, resource, action, principalId) => {
+          calls.push({ roles, resource, action, principalId });
+          return decision;
+        },
+      },
+    };
+  };
+
+  const AUTHZ = { resource: "person", action: "create" } as const;
+  const headers = { authorization: "Bearer fake", "x-actor-id": "actor" };
+
+  it("DENY explícito do Cerbos → forbidden (mesmo com role local válida)", async () => {
+    const cerbos = fakeCerbos(false);
+    const guard = createAuthGuard(fakeVerifier(["people-context:admin"]), cerbos.client);
+    const result = await guard(headers, ["admin"], true, AUTHZ);
+    expect(result.kind).toBe("forbidden");
+    // passou o principal (sub) e os grupos como roles p/ o decision log
+    expect(cerbos.calls).toHaveLength(1);
+    expect(cerbos.calls[0]).toMatchObject({
+      resource: "person",
+      action: "create",
+      principalId: "actor-1",
+      roles: ["people-context:admin"],
+    });
+  });
+
+  it("ALLOW do Cerbos → ok", async () => {
+    const cerbos = fakeCerbos(true);
+    const guard = createAuthGuard(fakeVerifier(["people-context:admin"]), cerbos.client);
+    const result = await guard(headers, ["admin"], true, AUTHZ);
+    expect(result.kind).toBe("ok");
+  });
+
+  it("indeterminado (Cerbos off/erro → null) defere ao guard local (ok)", async () => {
+    const cerbos = fakeCerbos(null);
+    const guard = createAuthGuard(fakeVerifier(["people-context:admin"]), cerbos.client);
+    const result = await guard(headers, ["admin"], true, AUTHZ);
+    expect(result.kind).toBe("ok");
+  });
+
+  it("sem authz → Cerbos NÃO é consultado (comportamento inalterado)", async () => {
+    const cerbos = fakeCerbos(false); // negaria se consultado
+    const guard = createAuthGuard(fakeVerifier(["people-context:admin"]), cerbos.client);
+    const result = await guard(headers, ["admin"]); // sem authz
+    expect(result.kind).toBe("ok");
+    expect(cerbos.calls).toHaveLength(0);
+  });
+
+  it("role local reprova ANTES do Cerbos → forbidden sem consultar o PDP", async () => {
+    const cerbos = fakeCerbos(true); // permitiria se consultado
+    const guard = createAuthGuard(fakeVerifier(["people-context:viewer"]), cerbos.client);
+    const result = await guard(headers, ["admin"], true, AUTHZ);
+    expect(result.kind).toBe("forbidden");
+    expect(cerbos.calls).toHaveLength(0);
   });
 });

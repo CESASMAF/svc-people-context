@@ -41,12 +41,11 @@ export interface Person {
   readonly cpf: string | null;
   readonly birthDate: string;
   readonly email: string | null;
-  // IdP user identifiers (Authentik).
-  // - `idpUserId`: o `uid` (hash hex64) que viaja no `sub` do JWT — actorId conforme ADR-023.
-  // - `idpUserPk`: pk integer do Authentik usado em mutacoes da Management API
-  //   (`/api/v3/core/users/{pk}/`). Filtro `?uid=` nao funciona no DRF — code-review HIGH-6.
+  // IdP user identifier (Ory Kratos). `idpUserId` = identity.id (UUID) que viaja
+  // no `sub` do JWT — actorId conforme ADR-023. É o único identificador (o Kratos
+  // não tem `pk`/`uid` separados como o Authentik; a coluna idp_user_pk foi
+  // removida na migration 7).
   readonly idpUserId: string | null;
-  readonly idpUserPk: number | null;
   readonly active: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
