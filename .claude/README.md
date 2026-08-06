@@ -35,6 +35,8 @@ recusam, nunca veem o código): `ref-elysia`, `ref-postgresql`, `ref-nats`, `ref
 (`subagent_type: "acdg-ref:ref-<tech>"`). Plugin habilitado em `.claude/settings.json`.
 Ver `infra/reference-network/README.md`.
 
-## Nota de auth (transição)
-`middleware/jwt.ts` ainda valida JWKS do **Zitadel**; o alvo do deploy BV é **Authentik** (o `idp/client.ts`
-já é Authentik). A migração da verificação JWT é pendência conhecida — ver `rules/security-lgpd.md`.
+## Nota de auth (o serviço está partido entre dois estágios)
+`src/idp/` já fala a Admin API do **Ory Kratos** e o AuthGuard consulta o **Cerbos**
+(commit `eabef49`), mas `src/middleware/jwt.ts` ainda comenta **Authentik** na
+extração da claim `groups`. Zitadel só sobrevive como `legacy_zitadel_sub` (ADR-031).
+Detalhe por camada em `agents/auth-idp-expert.md`; invariantes em `rules/security-lgpd.md`.

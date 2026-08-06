@@ -25,9 +25,9 @@ type ValidationResult =
   | { readonly kind: "error"; readonly message: string }
 ```
 
-**IdP / adapters — `AuthentikResult<T>`** (discriminante `ok`, no-throw boundary):
+**IdP / adapters — `IdpResult<T>`** (discriminante `ok`, no-throw boundary):
 ```ts
-type AuthentikResult<T> =
+type IdpResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly code: number; readonly message: string }
 ```

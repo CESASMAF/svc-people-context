@@ -45,14 +45,14 @@ import { createPeopleRoutes } from "../../src/routes/people.ts";
 import { createFakePersonRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
-import { createNoopAuthentikClient } from "../../src/idp/index.ts";
+import { createNoopIdpClient } from "../../src/idp/index.ts";
 import { parseJson, dataAs, dataAsArray, type IdData, type PersonData } from "./test-types.ts";
 
 const setup = () => {
   const people = createFakePersonRepository();
   const guard = createFakeAuthGuard();
   const publisher = createFakePublisher();
-  const idp = createNoopAuthentikClient();
+  const idp = createNoopIdpClient();
   const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
   return { app, people, publisher };
 };
@@ -96,7 +96,6 @@ export const createFakePersonRepository = (): PersonRepository & { readonly _sto
         birthDate: input.birthDate,
         email: input.email ?? null,
         idpUserId: null,
-        idpUserPk: null,
         active: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -174,7 +173,7 @@ const setup = (guardRoles?: string[], guardSub?: string) => {
     ? createFakeAuthGuardWithRoles(guardRoles, guardSub)
     : createFakeAuthGuardWithRoles(["superadmin"]);
   const publisher = createFakePublisher();
-  const idp = createNoopAuthentikClient();
+  const idp = createNoopIdpClient();
   const peopleGuard = createFakeAuthGuard(); // guard permissivo para createPerson helper
   const app = new Elysia()
     .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
@@ -238,7 +237,7 @@ describe("validateCreatePerson", () => {
 
 ```bash
 bun test --coverage       # relatório no terminal
-node scripts/check-coverage.js  # gate ≥95% (falha se abaixo)
+bun scripts/check-coverage.js   # gate ≥95% (falha se abaixo)
 ```
 
 O script `scripts/check-coverage.js` é o árbitro do gate de CI. Não reduza o limiar. Se a cobertura cair, escreva o teste que cobre o branch faltante — nunca exclua branches do relatório.
@@ -249,13 +248,13 @@ O script `scripts/check-coverage.js` é o árbitro do gate de CI. Não reduza o 
 tests/
 ├── domain/          ← testes de branded types, smart constructors, validateXxx
 ├── middleware/      ← testes de jwt.ts, auth.ts (createAuthGuard)
-├── idp/             ← testes do cliente Authentik (createAuthentikClient)
+├── idp/             ← testes do cliente do IdP (createIdpClient, Kratos)
 ├── application/     ← testes de provisionUserInIdp, syncRoleAssignment/Removal
 ├── events/          ← testes do Outbox publisher (subjects, LGPD: sem CPF)
 └── routes/          ← testes de handler (instancia Elysia app com fakes)
     ├── fake-repositories.ts
     ├── fake-auth.ts
-    ├── fake-authentik.ts
+    ├── fake-idp.ts
     ├── fake-publisher.ts
     ├── test-types.ts
     ├── health.test.ts
@@ -286,7 +285,7 @@ O test-writer **não consulta `ref-*`** como regra geral — os exemplares reais
 
 ## Sinais de que este agente está em ação
 
-- A tarefa menciona: `bun:test`, cobertura, fake, mock, `tests/`, `describe`/`it`/`expect`, gate 95%, `check-coverage.js`, `createFakePersonRepository`, `createFakeAuthGuard`, `createFakePublisher`, `fake-authentik`, `test-types.ts`, `parseJson`, `dataAs`, `expectOk`.
+- A tarefa menciona: `bun:test`, cobertura, fake, mock, `tests/`, `describe`/`it`/`expect`, gate 95%, `check-coverage.js`, `createFakePersonRepository`, `createFakeAuthGuard`, `createFakePublisher`, `fake-idp`, `test-types.ts`, `parseJson`, `dataAs`, `expectOk`.
 - O arquivo-alvo está em `tests/`.
 - A pergunta é sobre como testar um comportamento específico de handler, aplicação ou domínio.
 - O CI falhou com "coverage below threshold".
