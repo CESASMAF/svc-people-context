@@ -16,10 +16,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "verify": "bun run typecheck && bun run format:check && bun run lint && bun test && bun run coverage",
-    "pipeline:state": "bun run scripts/pipeline/state-cli.ts",
-    "pipeline:status": "bun run scripts/pipeline/dashboard-cli.ts",
-    "pipeline:metrics": "bun run scripts/pipeline/metrics-cli.ts"
+    "verify": "bun run typecheck && bun run format:check && bun run lint && bun test && bun run coverage"
   },
   "devDependencies": {
     "@eslint/js": "^9",
