@@ -7,7 +7,7 @@ description: >
   `t.Optional`), envelope de resposta `{data,meta:{timestamp}}` ou
   `{success:false,error:{code,message}}`, padrão de guard RBAC, 207
   multi-status para provisioning parcial, error codes PEO/ROL/IDP/AUTH,
-  adição ou modificação de endpoint nos 12 existentes, ou qualquer questão
+  adição ou modificação de endpoint nos 18 existentes, ou qualquer questão
   de contrato HTTP desta camada.
 tools: Read, Glob, Grep, Bash, Edit, Write, Skill, WebFetch
 model: sonnet
@@ -25,7 +25,7 @@ Você é o expert da camada `src/routes/` do serviço `people-context`. Seu esco
 1. CLAUDE.md (raiz do repo)                          ← stack, error codes, envelope
 2. .claude/rules/functional-ts.md + security-lgpd.md ← no-class, Result, LGPD, RBAC
 3. src/routes/people.ts + roles.ts + health.ts       ← exemplares canônicos REAIS
-4. contracts/services/people/                        ← OpenAPI 3.1 (fonte de verdade dos 12 endpoints)
+4. contracts/services/people/                        ← OpenAPI 3.1 (contrato dos endpoints)
 5. package.json                                      ← elysia 1.4.28 (versão real — não assuma outra)
 6. Reference Network: acdg-ref:ref-elysia            ← fatos frios de doc (handler, TypeBox, lifecycle, Eden)
 ```
@@ -42,7 +42,7 @@ type PeopleRouteDeps = {
   readonly people: PersonRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
-  readonly idp: AuthentikClient;
+  readonly idp: IdpClient;   // src/idp/ — hoje fala a Admin API do Ory Kratos
 };
 
 export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRouteDeps) =>
@@ -59,7 +59,7 @@ type RolesRouteDeps = {
   readonly roles: RoleRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
-  readonly idp: AuthentikClient;
+  readonly idp: IdpClient;
 };
 export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: RolesRouteDeps) =>
   new Elysia({ prefix: "/api/v1" })
@@ -150,11 +150,14 @@ const timestamp = () => new Date().toISOString();
 
 ```ts
 // AppSec HIGH-5: IdP PRIMEIRO, DB depois. Ordem é invariante.
-if (person.idpUserPk !== null) {
-  const deactivateResult = await idp.deactivateUser(person.idpUserPk);
+// `idpUserId` é o identificador único do usuário no IdP (no Kratos, o
+// `identity.id` UUID, que também é o `sub` do JWT). NÃO existe mais um `pk`
+// separado — a coluna `idp_user_pk` foi dropada na migration 7.
+if (person.idpUserId !== null) {
+  const deactivateResult = await idp.deactivateUser(person.idpUserId);
   if (!deactivateResult.ok) {
-    // AppSec HIGH-7: NAO vazar Authentik message no response.
-    console.warn(`[idp] deactivateUser failed pk=${person.idpUserPk} code=${deactivateResult.code}`);
+    // AppSec HIGH-7: NAO vazar a mensagem do IdP no response.
+    console.warn(`[idp] deactivateUser failed id=${person.idpUserId} code=${deactivateResult.code}`);
     set.status = 502;
     return { success: false, error: { code: "IDP-002", message: "Failed to deactivate IdP user" } };
   }
@@ -210,7 +213,10 @@ if (!callerIsSuperAdmin && person.idpUserId === auth.auth.sub) {
 }
 ```
 
-## Os 12 endpoints (OpenAPI 3.1)
+## Os 18 endpoints
+
+Contados em `src/routes/`: `people.ts` 10 · `roles.ts` 5 · `admin.ts` 1 ·
+`health.ts` 2. Ao adicionar rota, atualize esta tabela **e** o contrato OpenAPI.
 
 | Método | Path | Roles | Status de sucesso |
 |--------|------|-------|-------------------|
@@ -222,13 +228,21 @@ if (!callerIsSuperAdmin && person.idpUserId === auth.auth.sub) {
 | PUT | `/api/v1/people/:personId/deactivate` | admin | 204 |
 | PUT | `/api/v1/people/:personId/reactivate` | admin | 204 |
 | POST | `/api/v1/people/:personId/request-password-reset` | admin | 202 |
+| POST | `/api/v1/people/:personId/login` | worker, admin | 201 (provisiona no IdP) |
+| DELETE | `/api/v1/people/:personId` | **superadmin** | 204 (erasure LGPD Art. 18 V; `PEO-010` se não for superadmin) |
 | POST | `/api/v1/people/:personId/roles` | admin | 201 (204 se já existe) |
 | GET | `/api/v1/people/:personId/roles` | worker, owner, admin | 200 |
 | PUT | `/api/v1/people/:personId/roles/:roleId/deactivate` | admin | 204 |
 | PUT | `/api/v1/people/:personId/roles/:roleId/reactivate` | admin | 204 |
 | GET | `/roles` | worker, owner, admin | 200 |
+| POST | `/api/v1/admin/reconcile-idp` | **superadmin** | 200 (`ADM-001` se não for superadmin) |
 | GET | `/health` | — (público) | 200 |
 | GET | `/ready` | — (público) | 200 ou 503 |
+
+> `src/routes/admin.ts` é um router à parte, com prefixo `/api/v1/admin`.
+> Dispara a reconciliação IdP↔DB (`application/reconciliation.ts`) e é pensado
+> para ser chamado por cron externo. Operação de manutenção: restrita a
+> `superadmin`, sem escopo por sistema.
 
 ## Error codes canônicos
 
@@ -241,6 +255,9 @@ if (!callerIsSuperAdmin && person.idpUserId === auth.auth.sub) {
 | PEO-005 | Person já inativa |
 | PEO-006 | Person já ativa |
 | PEO-007 | Person sem login no IdP |
+| PEO-008 | Person já tem login |
+| PEO-009 | Email obrigatório para criar login |
+| PEO-010 | Só superadmin pode deletar pessoa |
 | ROL-001 | Validação de role falhou |
 | ROL-002 | Active role not found |
 | ROL-003 | Inactive role not found |
@@ -254,9 +271,11 @@ if (!callerIsSuperAdmin && person.idpUserId === auth.auth.sub) {
 | IDP-002 | Deactivate IdP falhou |
 | IDP-003 | Reactivate IdP falhou |
 | IDP-004 | Password reset IdP falhou |
+| IDP-005 | Falha ao deletar user no IdP |
 | AUTH-001 | Token ausente/inválido |
 | AUTH-002 | Role insuficiente |
 | AUTH-003 | X-Actor-Id ausente |
+| ADM-001 | Reconciliação restrita a superadmin |
 
 ## Reference Network
 
