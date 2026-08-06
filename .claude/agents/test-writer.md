@@ -159,7 +159,7 @@ export const createFakePublisher = (): EventPublisher & { readonly published: Ar
 };
 ```
 
-**`createFakeAuthentikClient`** existe em `tests/routes/fake-authentik.ts` — use-o quando o teste precisa verificar chamadas ao IdP (ex: deactivate, reactivate, syncRoleAssignment).
+**`createFakeIdpClient`** existe em `tests/routes/fake-idp.ts` — use-o quando o teste precisa verificar chamadas ao IdP (ex: deactivate, reactivate, syncRoleAssignment). O nome é neutro de propósito: o IdP mudou de Zitadel para Authentik e depois para Ory Kratos; o fake não se renomeia a cada migração.
 
 ### Setup de rota com dois routers (padrão de `roles.test.ts`)
 

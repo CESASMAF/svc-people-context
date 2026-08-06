@@ -13,9 +13,9 @@ da camada certa (um por vez) e delega fatos frios de doc à Reference Network.
 | `people-orchestrator` | roteador único (opus) |
 | `functional-domain-expert` | `domain/` — branded types, VOs, `ValidationResult` |
 | `application-expert` | `application/` — orquestração pura, idp-sync (ADR-029) |
-| `repository-expert` | `repository/` — postgres.js, migrations, SQL parametrizado |
+| `repository-expert` | `repository/` — `Bun.sql` (ADR-0002), migrations, SQL parametrizado |
 | `events-outbox-expert` | `events/` — Outbox publisher + relay, subjects NATS |
-| `auth-idp-expert` | `middleware/` + `idp/` — JWT/JWKS, RBAC, Authentik Mgmt API |
+| `auth-idp-expert` | `middleware/` + `idp/` — JWT/JWKS, RBAC, Admin API do IdP (hoje Ory Kratos) |
 | `elysia-http-expert` | `routes/` — handlers Elysia, TypeBox, envelope, error codes |
 | `test-writer` | `tests/` — bun:test, fakes in-memory, gate ≥95% |
 

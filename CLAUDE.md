@@ -32,63 +32,12 @@ docker compose up --build
 
 ## TypeScript Guidelines
 
-**MANDATORY**: Always consult `handbook/references/typescript/` before writing code. Key rules:
-
-### Functional Programming — Non-Negotiable
-
-- **NO classes**. Ever. No `class`, no `this`, no `new` (except for external libs).
-- **NO inheritance**. Use composition and higher-order functions.
-- All data structures are plain objects with `type` or `interface`.
-- All behavior is expressed as **pure functions**.
-- Use `readonly` for all data properties — immutability by default.
-- Use closures and factory functions instead of stateful objects.
-- Prefer `type` aliases for unions/intersections; `interface` for object shapes.
-- Use `unknown` instead of `any`. Never use `any`.
-
-### Function Patterns
-
-- Prefer arrow functions for consistency.
-- Use parameter destructuring for cleaner APIs.
-- Generic type parameters must appear at least twice (relate inputs to outputs).
-- Let TypeScript infer types when possible — annotate only when necessary.
-- Prefer union types over enums (unless runtime values needed).
-
-### Module Organization
-
-- ES Modules with `export/import`.
-- Use `export type` for type-only exports.
-- Barrel exports via `index.ts` per module.
-
-### Example — Repository Pattern (Functional)
-
-```typescript
-// CORRECT — functional, composable
-import type { Sql } from "postgres";
-
-interface PersonRepository {
-  readonly findById: (id: string) => Promise<Person | null>;
-  readonly create: (input: CreatePersonInput) => Promise<Person>;
-}
-
-const createPersonRepository = (sql: Sql): PersonRepository => ({
-  findById: async (id) => {
-    /* ... */
-  },
-  create: async (input) => {
-    /* ... */
-  },
-});
-```
-
-```typescript
-// WRONG — class-based
-class PersonRepository {
-  constructor(private sql: Sql) {}
-  async findById(id: string) {
-    /* ... */
-  }
-}
-```
+As invariantes de estilo — no-class, no-any, no-throw no domínio, `readonly`,
+branded types, factory functions para DI e o import boundary entre camadas —
+vivem em `.claude/rules/functional-ts.md`, que carrega automaticamente. **Não
+duplicar aqui.** (Não há espelho local de doc de TypeScript: `handbook/references/`
+tem apenas um README. Para fatos de doc, use a Reference Network —
+`acdg-ref:ref-elysia`, `ref-postgresql`, `ref-nats`.)
 
 ## Architecture
 
@@ -161,22 +110,6 @@ bun run verify   # typecheck && format:check && lint && test && coverage (≥95%
 - **Prettier** (`.prettierrc.json`): printWidth 100, **double-quote** (estilo do repo), semi.
 - Overrides por camada: `domain/application` proíbem `throw`; adapters e `routes` relaxam
   `require-await`/readonly; `tests` relaxa fakes.
-
-## Pipeline SDD — `people-context-sdd` (máximo rigor)
-
-Pipeline spec-driven (RED→YELLOW→GREEN, 17 fases) portado do `core-api-sdd`, em
-`.specify/`. Use para features não-triviais. **Guia completo: `.specify/README.md`**;
-protocolo de gate (texto puro, nunca `AskUserQuestion`): `.specify/.smoke-test/RUNBOOK.md`;
-princípios I–X: `.specify/memory/constitution.md`.
-
-- **Orquestração in-session** (não headless): o `people-orchestrator` percorre o
-  `.specify/workflows/people-context-sdd/workflow.yml`; `command: speckit.*` → skill
-  `/speckit-*`; `type: gate` → texto puro + `approve`/`reject`; citação → `skills_*`.
-- **Máquina fail-first W0→W3**: `bun run pipeline:state init <T> --size <S|M|L>` →
-  `wave-start/finish/round` → `close`; dashboard `bun run pipeline:status`. Tickets em
-  `.pipeline/<TICKET>/STATE.json` (histórico auditável — não deletar).
-- **Gate W3 = `/speckit-verify`** (= `bun run verify`). Decisões-chave exigem citação
-  canônica ≥4 linhas via `skills_citar` (MCP `acdg-skills`).
 
 ## Reference Network — consulta fria (especialistas externos)
 
