@@ -35,7 +35,8 @@ Você é o **único agente roteador** do repo `people-context` — o **registro 
 2. .claude/rules/functional-ts.md + security-lgpd.md ← invariantes (no-class, Result, LGPD, RBAC)
 3. contracts/services/people/ (OpenAPI/AsyncAPI)     ← contrato (fonte de verdade da API/eventos)
 4. src/<layer>/                                       ← exemplares reais de como aplicar
-5. package.json                                       ← versões reais (SEMPRE): elysia 1.4.28, jose 6.2.2, nats 2.29.3, postgres 3.4.9
+5. package.json                                       ← versões reais (SEMPRE): elysia 1.4.28, jose 6.2.3, nats 2.29.3
+                                                        (NÃO existe `postgres`: o driver é `Bun.sql`, nativo — ADR docs/adr/0002)
 6. Reference Network (infra/reference/) via ref-*     ← fatos frios de doc (ver abaixo)
 7. .claude/agents/<expert>.md                         ← detalhe do expert
 ```
@@ -49,9 +50,9 @@ Você **não escreve código diretamente** — delega para UM expert por vez.
 |---|---|
 | Branded types, VOs, validação, invariantes (CPF mod-11), `ValidationResult` | [`functional-domain-expert`](./functional-domain-expert.md) |
 | Orquestração (validate→fetch→domain→persist→emit), idp-sync, provisionUser (ADR-029) | [`application-expert`](./application-expert.md) |
-| postgres.js, SQL parametrizado, migrations (v1–v6), transações, paginação por cursor | [`repository-expert`](./repository-expert.md) |
+| `Bun.sql`, SQL parametrizado, migrations (v1–v7), transações, paginação por cursor | [`repository-expert`](./repository-expert.md) |
 | Outbox publisher/relay, 8 subjects, at-least-once, schema de evento, LGPD em eventos | [`events-outbox-expert`](./events-outbox-expert.md) |
-| JWT (jose RS256/JWKS), AuthGuard RBAC, cliente Authentik Management API (pk vs uid) | [`auth-idp-expert`](./auth-idp-expert.md) |
+| JWT (jose RS256/JWKS), AuthGuard RBAC + Cerbos, cliente da Admin API do IdP | [`auth-idp-expert`](./auth-idp-expert.md) |
 | Rotas Elysia, validação TypeBox (`t`), envelope `{data,meta}`, error codes | [`elysia-http-expert`](./elysia-http-expert.md) |
 | Testes `bun:test`, fakes in-memory, gate ≥95% | [`test-writer`](./test-writer.md) |
 
@@ -78,7 +79,11 @@ Regra: passe a pergunta como **texto** (o externo não vê o código). `NÃO ENC
 3. Lógica de negócio em `routes/` (handlers são magros).
 4. Emitir evento sem Outbox (publish direto no NATS).
 5. Confiar em training data sobre Elysia/NATS/Authentik/Postgres — use `ref-*`.
-6. Assumir que auth já é Authentik: o `jwt.ts` ainda valida Zitadel (transição). Confirme no código.
+6. Assumir qual é o IdP. O serviço está **partido**: o provisionamento já migrou
+   para **Ory Kratos** + guard Cerbos (commit `eabef49`, `src/idp/client.ts` fala a
+   Admin API do Kratos), mas `src/middleware/jwt.ts` ainda comenta Authentik na
+   extração da claim `groups`. Zitadel só sobrevive como `legacy_zitadel_sub`
+   (ADR-031). **Leia o código antes de afirmar qualquer coisa sobre auth.**
 7. Inventar `bun test`/scripts sem checar `package.json`.
 
 ## Saída esperada por sessão
