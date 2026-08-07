@@ -26,7 +26,11 @@ interface KratosIdentity {
   readonly id: string;
   readonly schema_id: string;
   readonly state: "active" | "inactive";
-  readonly traits: { readonly email?: string; readonly name?: string };
+  // `name` e OBJETO no schema `person_v1` (identity.schema.json), nao string.
+  readonly traits: {
+    readonly email?: string;
+    readonly name?: { readonly first?: string; readonly last?: string };
+  };
   readonly metadata_public?: Record<string, unknown> | null;
   readonly created_at?: string;
 }
@@ -99,17 +103,36 @@ const request = async <T>(
 const asStringArray = (v: unknown): readonly string[] =>
   Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
 
+/// Chave onde as roles vivem em `metadata_public` da identidade Kratos.
+///
+/// CONTRATO COM O CONSENT-BRIDGE: `bridge.ts` monta a claim `groups` do JWT lendo
+/// `identity.metadata_public.roles` — e o `bootstrap.sh` do IdP semeia os usuarios nessa mesma
+/// chave. Gravar em `groups` (como era antes) fazia o usuario criado pelo app logar SEM nenhuma
+/// role: o token saia com `groups: []` e todo endpoint respondia 403, sem erro visivel em lugar
+/// nenhum. Se esta chave mudar, ela muda nos TRES lugares juntos.
+const KRATOS_ROLES_KEY = "roles";
+
+/// O schema `person_v1` (config/kratos/identity.schema.json) declara `traits.name` como OBJETO
+/// `{ first, last }`. Mandar a string crua faz o Kratos responder 400 —
+/// "I[#/traits/name] expected object, but got string" — e o provisionamento falha silenciosamente
+/// (a pessoa nasce sem login). O dominio trabalha com nome completo; traduzir e papel deste adapter.
+const toKratosName = (fullName: string): Readonly<{ first: string; last: string }> => {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return { first: parts[0] ?? "", last: parts.slice(1).join(" ") };
+};
+
 const mapIdentity = (id: KratosIdentity): IdpUser => {
   const md = (id.metadata_public ?? {}) as Record<string, unknown>;
-  // separa `groups`/`username` do restante (= atributos ACDG)
-  const { groups, username, ...attributes } = md;
+  // separa `roles`/`username` do restante (= atributos ACDG). A chave persistida no Kratos e
+  // `roles` (ver KRATOS_ROLES_KEY); `IdpUser.groups` continua sendo o nome do conceito aqui dentro.
+  const { roles, username, ...attributes } = md;
   return {
     id: id.id,
     username: typeof username === "string" ? username : "",
-    name: id.traits.name ?? "",
+    name: [id.traits.name?.first, id.traits.name?.last].filter(Boolean).join(" "),
     email: id.traits.email ?? "",
     active: id.state === "active",
-    groups: asStringArray(groups),
+    groups: asStringArray(roles),
     attributes: attributes as ACDGUserAttributes,
     createdAt: id.created_at ?? "",
   };
@@ -158,8 +181,8 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
   ): Promise<IdpResult<undefined>> => {
     const result = await modify(id, (cur) => {
       const md = (cur.metadata_public ?? {}) as Record<string, unknown>;
-      const next = [...new Set(reduce(asStringArray(md.groups)))];
-      return { ...baseBody(cur), metadata_public: { ...md, groups: next } };
+      const next = [...new Set(reduce(asStringArray(md[KRATOS_ROLES_KEY])))];
+      return { ...baseBody(cur), metadata_public: { ...md, [KRATOS_ROLES_KEY]: next } };
     });
     if (!result.ok) return result;
     return { ok: true, data: undefined };
@@ -171,9 +194,9 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
       request<KratosIdentity>(config, "POST", "/admin/identities", {
         schema_id: "person_v1",
         state: input.is_active === false ? "inactive" : "active",
-        traits: { email: input.email, name: input.name },
+        traits: { email: input.email, name: toKratosName(input.name) },
         metadata_public: {
-          groups: input.groups ?? [],
+          [KRATOS_ROLES_KEY]: input.groups ?? [],
           username: input.username,
           ...(input.attributes ?? {}),
         },
@@ -222,12 +245,14 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
     updateUserAttributes: async (id: IdpUserId, attributes: ACDGUserAttributes) =>
       modify(id, (cur) => {
         const md = (cur.metadata_public ?? {}) as Record<string, unknown>;
-        // preserva `groups`/`username`; sobrescreve só os atributos ACDG.
+        // preserva roles/`username`; sobrescreve só os atributos ACDG. Preservar a chave ERRADA
+        // aqui apagaria as roles da identidade a cada update de atributos — o usuario perderia
+        // todo acesso silenciosamente no proximo login.
         return {
           ...baseBody(cur),
           metadata_public: {
             ...attributes,
-            ...(md.groups !== undefined ? { groups: md.groups } : {}),
+            ...(md[KRATOS_ROLES_KEY] !== undefined ? { [KRATOS_ROLES_KEY]: md[KRATOS_ROLES_KEY] } : {}),
             ...(md.username !== undefined ? { username: md.username } : {}),
           },
         };
@@ -238,7 +263,8 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
         ...baseBody(cur),
         traits: {
           ...cur.traits,
-          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          // mesma traducao do createUser: `traits.name` e objeto no schema `person_v1`.
+          ...(patch.name !== undefined ? { name: toKratosName(patch.name) } : {}),
           ...(patch.email !== undefined ? { email: patch.email } : {}),
         },
         ...(patch.attributes !== undefined
@@ -252,10 +278,19 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
       })),
 
     // ── Recovery ─────────────────────────────────────────────────
+    // `/admin/recovery/code`, NAO `/admin/recovery/link`: o Kratos so expoe o endpoint de link
+    // quando `selfservice.methods.link.enabled` esta ligado — e a stack habilita `code` (o metodo
+    // recomendado pelo Ory), deixando `link` desligado. Chamar o endpoint errado devolve
+    // 404 "This endpoint was disabled by system administrator" e o reset de senha nunca funciona.
+    // O response de `code` traz recovery_link E recovery_code; seguimos entregando o link, que por
+    // ADR-030 viaja apenas no evento NATS — nunca no response HTTP.
     requestPasswordReset: async (id: IdpUserId) => {
-      const r = await request<{ recovery_link: string }>(config, "POST", "/admin/recovery/link", {
-        identity_id: id,
-      });
+      const r = await request<{ recovery_link: string; recovery_code: string }>(
+        config,
+        "POST",
+        "/admin/recovery/code",
+        { identity_id: id },
+      );
       if (!r.ok) return r;
       return {
         ok: true as const,
@@ -263,7 +298,7 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
       };
     },
 
-    // ── Roles (metadata_public.groups) ──────────────────────────
+    // ── Roles (metadata_public.roles — ver KRATOS_ROLES_KEY) ────
     addUserToGroup: async (group: string, id: IdpUserId) => setGroups(id, (cur) => [...cur, group]),
 
     removeUserFromGroup: async (group: string, id: IdpUserId) =>
@@ -272,7 +307,7 @@ export const createIdpClient = (config: IdpClientConfig): IdpClient => {
     listUserGroups: async (id: IdpUserId) => {
       const r = await request<KratosIdentity>(config, "GET", `/admin/identities/${id}`);
       if (!r.ok) return r;
-      return { ok: true as const, data: asStringArray(r.data.metadata_public?.groups) };
+      return { ok: true as const, data: asStringArray(r.data.metadata_public?.[KRATOS_ROLES_KEY]) };
     },
   };
 };

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 
 import { createIdpClient, createNoopIdpClient } from "../../src/idp/index.ts";
 import type { IdpUserId } from "../../src/idp/index.ts";
@@ -8,6 +8,16 @@ import type { IdpUserId } from "../../src/idp/index.ts";
 // A Admin API do Kratos usa read-modify-write (GET + PUT) em varias operacoes,
 // entao o mock recebe cada request (metodo + url + body ja parseado) e o teste
 // decide a resposta. `captured` guarda o historico para os asserts.
+
+// Rede de seguranca do isolamento: cada `it` chama `restore()` no fim, mas um teste que falha
+// (ou lanca) ANTES dessa linha deixa o mock instalado e contamina os seguintes — inclusive o
+// bloco "smoke contra Kratos real", que passa a bater no mock em vez do Kratos e falha com dados
+// do fixture ("joao@x.com"). Guardar o fetch nativo aqui e restaura-lo depois de CADA teste torna
+// o isolamento independente do caminho feliz.
+const NATIVE_FETCH = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = NATIVE_FETCH;
+});
 
 interface CapturedRequest {
   readonly url: string;
@@ -47,8 +57,9 @@ const identity = (overrides: Record<string, unknown> = {}): Record<string, unkno
   id: "11111111-1111-1111-1111-111111111111",
   schema_id: "person_v1",
   state: "active",
-  traits: { email: "joao@x.com", name: "Joao" },
-  metadata_public: { groups: [], username: "joao" },
+  // `traits.name` e OBJETO no schema `person_v1` do Kratos — string faz o Admin API responder 400.
+  traits: { email: "joao@x.com", name: { first: "Joao", last: "Silva" } },
+  metadata_public: { roles: [], username: "joao" },
   created_at: "2026-05-13T00:00:00Z",
   ...overrides,
 });
@@ -58,14 +69,14 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     const { captured, restore } = installFetch(() => ({
       status: 201,
       body: identity({
-        metadata_public: { groups: ["social-care:admin"], username: "joao", person_id: "p-1" },
+        metadata_public: { roles: ["social-care:admin"], username: "joao", person_id: "p-1" },
       }),
     }));
 
     const client = createIdpClient({ baseUrl: "http://x", token: "t" });
     const result = await client.createUser({
       username: "joao",
-      name: "Joao",
+      name: "Joao Silva", // nome completo: o adapter divide em first/last
       email: "joao@x.com",
       groups: ["social-care:admin"],
       attributes: { person_id: "p-1" },
@@ -87,9 +98,10 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     const body = req.body!;
     expect(body.schema_id).toBe("person_v1");
     expect(body.state).toBe("active");
-    expect(body.traits).toEqual({ email: "joao@x.com", name: "Joao" });
+    // nome completo do dominio → { first, last } exigido pelo schema `person_v1`.
+    expect(body.traits).toEqual({ email: "joao@x.com", name: { first: "Joao", last: "Silva" } });
     const md = body.metadata_public as Record<string, unknown>;
-    expect(md.groups).toEqual(["social-care:admin"]);
+    expect(md.roles).toEqual(["social-care:admin"]);
     expect(md.username).toBe("joao");
     expect(md.person_id).toBe("p-1");
     expect("credentials" in body).toBe(false); // sem password
@@ -263,14 +275,14 @@ describe("createIdpClient (unit, fetch mockado)", () => {
         ? {
             status: 200,
             body: identity({
-              metadata_public: { groups: ["social-care:admin"], username: "ana" },
+              metadata_public: { roles: ["social-care:admin"], username: "ana" },
             }),
           }
         : {
             status: 200,
             body: identity({
               metadata_public: {
-                groups: ["social-care:admin"],
+                roles: ["social-care:admin"],
                 username: "ana",
                 org_id: "acdg-default",
                 person_id: "p-1",
@@ -290,7 +302,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     }
     // O PUT preserva groups/username e grava os novos atributos.
     const md = captured[1]!.body!.metadata_public as Record<string, unknown>;
-    expect(md.groups).toEqual(["social-care:admin"]);
+    expect(md.roles).toEqual(["social-care:admin"]);
     expect(md.username).toBe("ana");
     expect(md.org_id).toBe("acdg-default");
     restore();
@@ -299,15 +311,19 @@ describe("createIdpClient (unit, fetch mockado)", () => {
   it("updateUserProfile: envia apenas os campos presentes no patch", async () => {
     const { captured, restore } = installFetch((req) =>
       req.method === "GET"
-        ? { status: 200, body: identity({ traits: { email: "ana@x.com", name: "Ana" } }) }
-        : { status: 200, body: identity({ traits: { email: "ana@x.com", name: "Ana Nova" } }) },
+        ? { status: 200, body: identity({ traits: { email: "ana@x.com", name: { first: "Ana", last: "Antiga" } } }) }
+        : {
+            status: 200,
+            body: identity({ traits: { email: "ana@x.com", name: { first: "Ana", last: "Nova" } } }),
+          },
     );
     const client = createIdpClient({ baseUrl: "http://x", token: "t" });
     const result = await client.updateUserProfile("id-1", { name: "Ana Nova" });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.name).toBe("Ana Nova");
     const traits = captured[1]!.body!.traits as Record<string, unknown>;
-    expect(traits.name).toBe("Ana Nova");
+    // nome completo do patch e traduzido para o objeto exigido pelo schema `person_v1`.
+    expect(traits.name).toEqual({ first: "Ana", last: "Nova" });
     expect(traits.email).toBe("ana@x.com"); // preservado do GET
     restore();
   });
@@ -320,16 +336,18 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     restore();
   });
 
-  it("requestPasswordReset: POST /admin/recovery/link → mapeia recovery_link para link", async () => {
+  // `code` e nao `link`: a stack habilita `selfservice.methods.code` e mantem `link` desligado —
+  // bater em /admin/recovery/link devolve 404 "endpoint disabled by system administrator".
+  it("requestPasswordReset: POST /admin/recovery/code → mapeia recovery_link para link", async () => {
     const { captured, restore } = installFetch(() => ({
       status: 200,
-      body: { recovery_link: "https://auth.example/recovery?token=abc" },
+      body: { recovery_link: "https://auth.example/recovery?token=abc", recovery_code: "123456" },
     }));
     const client = createIdpClient({ baseUrl: "http://x", token: "t" });
     const result = await client.requestPasswordReset("id-1");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.link).toBe("https://auth.example/recovery?token=abc");
-    expect(captured[0]!.url).toBe("http://x/admin/recovery/link");
+    expect(captured[0]!.url).toBe("http://x/admin/recovery/code");
     expect(captured[0]!.body!.identity_id).toBe("id-1");
     restore();
   });
@@ -345,11 +363,11 @@ describe("createIdpClient (unit, fetch mockado)", () => {
   it("addUserToGroup: adiciona a chave em metadata_public.groups (read-modify-write)", async () => {
     const { captured, restore } = installFetch((req) =>
       req.method === "GET"
-        ? { status: 200, body: identity({ metadata_public: { groups: [], username: "ana" } }) }
+        ? { status: 200, body: identity({ metadata_public: { roles: [], username: "ana" } }) }
         : {
             status: 200,
             body: identity({
-              metadata_public: { groups: ["social-care:admin"], username: "ana" },
+              metadata_public: { roles: ["social-care:admin"], username: "ana" },
             }),
           },
     );
@@ -357,7 +375,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     const result = await client.addUserToGroup("social-care:admin", "id-1");
     expect(result.ok).toBe(true);
     const md = captured[1]!.body!.metadata_public as Record<string, unknown>;
-    expect(md.groups).toEqual(["social-care:admin"]);
+    expect(md.roles).toEqual(["social-care:admin"]);
     restore();
   });
 
@@ -368,7 +386,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
             status: 200,
             body: identity({
               metadata_public: {
-                groups: ["social-care:admin", "social-care:worker"],
+                roles: ["social-care:admin", "social-care:worker"],
                 username: "ana",
               },
             }),
@@ -376,7 +394,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
         : {
             status: 200,
             body: identity({
-              metadata_public: { groups: ["social-care:worker"], username: "ana" },
+              metadata_public: { roles: ["social-care:worker"], username: "ana" },
             }),
           },
     );
@@ -384,7 +402,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
     const result = await client.removeUserFromGroup("social-care:admin", "id-1");
     expect(result.ok).toBe(true);
     const md = captured[1]!.body!.metadata_public as Record<string, unknown>;
-    expect(md.groups).toEqual(["social-care:worker"]);
+    expect(md.roles).toEqual(["social-care:worker"]);
     restore();
   });
 
@@ -393,7 +411,7 @@ describe("createIdpClient (unit, fetch mockado)", () => {
       status: 200,
       body: identity({
         metadata_public: {
-          groups: ["social-care:admin", "social-care:worker"],
+          roles: ["social-care:admin", "social-care:worker"],
           username: "ana",
         },
       }),
