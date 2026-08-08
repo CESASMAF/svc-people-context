@@ -26,7 +26,15 @@ export type AuthGuard = (
   // estiver configurado, a decisão do PDP é consultada APÓS o check de role local
   // (defense-in-depth): só pode ADICIONAR negação (DENY explícito → 403); ALLOW
   // ou indeterminado (Cerbos off/erro) deferem ao resultado local.
-  authz?: { readonly resource: string; readonly action: string },
+  //
+  // `resource`/`action` vêm de `policy-actions.ts` — string livre aqui foi o que
+  // derrubou produção em 2026-08-08 (recurso inexistente = DENY silencioso).
+  // `attr` alimenta as condições da policy (`R.attr.*`); obrigatório em `role`.
+  authz?: {
+    readonly resource: string;
+    readonly action: string;
+    readonly attr?: Readonly<Record<string, string>>;
+  },
 ) => Promise<AuthResult>;
 
 export const createAuthGuard =
@@ -84,7 +92,13 @@ export const createAuthGuard =
     // barra; ALLOW/indeterminado (Cerbos off/erro) deferem — o Cerbos só ADICIONA
     // negação, nunca concede além do guard local. auth.sub = principal do decision log.
     if (authz !== undefined && cerbos !== undefined) {
-      const decision = await cerbos.check(auth.roles, authz.resource, authz.action, auth.sub);
+      const decision = await cerbos.check({
+        roles: auth.roles,
+        resource: authz.resource,
+        action: authz.action,
+        principalId: auth.sub,
+        ...(authz.attr !== undefined ? { attr: authz.attr } : {}),
+      });
       if (decision === false) {
         return {
           kind: "forbidden",
@@ -116,4 +130,44 @@ export const createAuthGuard =
     const actorId = actorHeader !== undefined && actorHeader !== "" ? actorHeader : auth.sub;
 
     return { kind: "ok", auth, actorId };
+  };
+
+// ─── AuthZ em DUAS FASES (rotas de papel) ───────────────────────
+//
+// `role.yaml` decide por atributos do RECURSO (`R.attr.system`, `R.attr.targetRole`,
+// `R.attr.targetUserId`), e nenhum deles é conhecido no início da requisição: no POST
+// vêm do body validado; nos PUT, da atribuição carregada do banco. Por isso essas rotas
+// chamam `guard` SEM `authz` (JWT + role local + X-Actor-Id) e consultam o PDP aqui,
+// depois — em vez de mandar um check incompleto, que a policy negaria.
+//
+// Devolve `null` quando pode seguir (ALLOW ou indeterminado) e o próprio `forbidden`
+// quando o PDP negou — mesma forma do guard, para a rota só repassar.
+
+export type AuthzCheck = (
+  auth: AuthContext,
+  resource: string,
+  action: string,
+  attr: Readonly<Record<string, string>>,
+) => Promise<Extract<AuthResult, { kind: "forbidden" }> | null>;
+
+export const createAuthzCheck =
+  (cerbos?: CerbosClient): AuthzCheck =>
+  async (auth, resource, action, attr) => {
+    if (cerbos === undefined) return null;
+    const decision = await cerbos.check({
+      roles: auth.roles,
+      resource,
+      action,
+      principalId: auth.sub,
+      attr,
+    });
+    if (decision !== false) return null;
+    return {
+      kind: "forbidden",
+      status: 403,
+      response: {
+        success: false,
+        error: { code: "AUTH-002", message: `Cerbos negou ${action} em ${resource}` },
+      },
+    };
   };

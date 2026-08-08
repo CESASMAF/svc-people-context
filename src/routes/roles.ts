@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { RoleRepository } from "../repository/role-repository.ts";
-import type { AuthGuard } from "../middleware/auth.ts";
+import type { AuthGuard, AuthzCheck } from "../middleware/auth.ts";
+import { PeopleAction, PolicyResource, RoleAction } from "../middleware/policy-actions.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
 import { events } from "../events/publisher.ts";
@@ -22,19 +23,27 @@ interface RolesRouteDeps {
   readonly people: PersonRepository;
   readonly roles: RoleRepository;
   readonly guard: AuthGuard;
+  // PDP em 2a fase: `role.yaml` decide por atributos que só existem depois de validar o
+  // body (POST) ou de carregar a atribuição (PUT). Ver createAuthzCheck em middleware/auth.
+  readonly authz: AuthzCheck;
   readonly publisher: EventPublisher;
   readonly idp: IdpClient;
 }
 
-export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: RolesRouteDeps) =>
+export const createRolesRoutes = ({
+  people,
+  roles,
+  guard,
+  authz,
+  publisher,
+  idp,
+}: RolesRouteDeps) =>
   new Elysia({ prefix: "/api/v1" })
     .post(
       "/people/:personId/roles",
       async ({ params, body, headers, set }) => {
-        const auth = await guard(headers, ["admin"], true, {
-          resource: "person",
-          action: "assign-role",
-        });
+        // Sem `authz`: o PDP entra na 2a fase, quando `system`/`role`/alvo já são conhecidos.
+        const auth = await guard(headers, ["admin"], true);
         if (auth.kind !== "ok") {
           set.status = auth.status;
           return auth.response;
@@ -96,6 +105,18 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
           };
         }
 
+        // PDP (2a fase): as MESMAS regras 1-3 acima, agora em policy versionada e com
+        // decision log. `targetUserId` é o uid do IdP — é com ele que a Rule 3 compara.
+        const denied = await authz(auth.auth, PolicyResource.role, RoleAction.assign, {
+          system: body.system,
+          targetRole: body.role,
+          targetUserId: person.idpUserId ?? "",
+        });
+        if (denied !== null) {
+          set.status = denied.status;
+          return denied.response;
+        }
+
         const { role, created } = await roles.assign(params.personId, body);
         if (!created) {
           set.status = 204;
@@ -133,8 +154,8 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
 
     .get("/people/:personId/roles", async ({ headers, params, query, set }) => {
       const auth = await guard(headers, ["worker", "owner", "admin"], false, {
-        resource: "person",
-        action: "read",
+        resource: PolicyResource.people,
+        action: PeopleAction.rolesList,
       }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -161,10 +182,8 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .put("/people/:personId/roles/:roleId/deactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "remove-role",
-      });
+      // Sem `authz`: o sistema e o papel-alvo só existem depois de carregar a atribuição.
+      const auth = await guard(headers, ["admin"], true);
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -199,6 +218,18 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
       }
 
       const person = await people.findById(params.personId);
+
+      // PDP (2a fase) — ver a rota de atribuição.
+      const denied = await authz(auth.auth, PolicyResource.role, RoleAction.deactivate, {
+        system: existingRole.system,
+        targetRole: existingRole.role,
+        targetUserId: person?.idpUserId ?? "",
+      });
+      if (denied !== null) {
+        set.status = denied.status;
+        return denied.response;
+      }
+
       const deactivated = await roles.deactivate(params.personId, params.roleId);
       if (deactivated === null) {
         // Race: foi desativada por outra request entre findById e deactivate.
@@ -231,10 +262,8 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
     })
 
     .put("/people/:personId/roles/:roleId/reactivate", async ({ params, headers, set }) => {
-      const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "assign-role",
-      });
+      // Sem `authz`: o sistema e o papel-alvo só existem depois de carregar a atribuição.
+      const auth = await guard(headers, ["admin"], true);
       if (auth.kind !== "ok") {
         set.status = auth.status;
         return auth.response;
@@ -269,6 +298,18 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
       }
 
       const person = await people.findById(params.personId);
+
+      // PDP (2a fase) — ver a rota de atribuição.
+      const denied = await authz(auth.auth, PolicyResource.role, RoleAction.reactivate, {
+        system: existingRole.system,
+        targetRole: existingRole.role,
+        targetUserId: person?.idpUserId ?? "",
+      });
+      if (denied !== null) {
+        set.status = denied.status;
+        return denied.response;
+      }
+
       const reactivated = await roles.reactivate(params.personId, params.roleId);
       if (reactivated === null) {
         set.status = 409;
@@ -301,8 +342,8 @@ export const createRolesRoutes = ({ people, roles, guard, publisher, idp }: Role
 
     .get("/roles", async ({ headers, query, set }) => {
       const auth = await guard(headers, ["worker", "owner", "admin"], false, {
-        resource: "person",
-        action: "read",
+        resource: PolicyResource.people,
+        action: PeopleAction.rolesList,
       }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;

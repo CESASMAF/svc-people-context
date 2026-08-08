@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { RoleRepository } from "../repository/role-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
+import { PeopleAction, PolicyResource } from "../middleware/policy-actions.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
 import { events } from "../events/publisher.ts";
@@ -35,8 +36,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
       "/people",
       async ({ body, headers, set }) => {
         const auth = await guard(headers, ["worker", "admin"], true, {
-          resource: "person",
-          action: "create",
+          resource: PolicyResource.people,
+          action: PeopleAction.create,
         });
         if (auth.kind !== "ok") {
           set.status = auth.status;
@@ -132,8 +133,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
 
     .get("/people", async ({ headers, query, set }) => {
       const auth = await guard(headers, ["worker", "owner", "admin"], false, {
-        resource: "person",
-        action: "read",
+        resource: PolicyResource.people,
+        action: PeopleAction.list,
       }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -162,8 +163,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
 
     .get("/people/by-cpf/:cpf", async ({ headers, params, set }) => {
       const auth = await guard(headers, ["worker", "owner", "admin"], false, {
-        resource: "person",
-        action: "read",
+        resource: PolicyResource.people,
+        action: PeopleAction.get,
       }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -188,8 +189,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
 
     .get("/people/:personId", async ({ headers, params, set }) => {
       const auth = await guard(headers, ["worker", "owner", "admin"], false, {
-        resource: "person",
-        action: "read",
+        resource: PolicyResource.people,
+        action: PeopleAction.get,
       }); // GET: actorId do JWT.sub
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -216,8 +217,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
       "/people/:personId",
       async ({ params, body, headers, set }) => {
         const auth = await guard(headers, ["worker", "admin"], true, {
-          resource: "person",
-          action: "update",
+          resource: PolicyResource.people,
+          action: PeopleAction.update,
         });
         if (auth.kind !== "ok") {
           set.status = auth.status;
@@ -280,8 +281,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
     // ─── Deactivate person + Authentik user ────────────────────────
     .put("/people/:personId/deactivate", async ({ params, headers, set }) => {
       const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "deactivate",
+        resource: PolicyResource.people,
+        action: PeopleAction.deactivate,
       });
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -352,8 +353,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
     // ─── Reactivate person + Authentik user ────────────────────────
     .put("/people/:personId/reactivate", async ({ params, headers, set }) => {
       const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "reactivate",
+        resource: PolicyResource.people,
+        action: PeopleAction.reactivate,
       });
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -416,8 +417,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
     // Apenas publica evento NATS para queue-manager montar email PT-BR.
     .post("/people/:personId/request-password-reset", async ({ params, headers, set }) => {
       const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "request-password-reset",
+        resource: PolicyResource.people,
+        action: PeopleAction.passwordReset,
       });
       if (auth.kind !== "ok") {
         set.status = auth.status;
@@ -477,8 +478,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
       "/people/:personId/login",
       async ({ params, body, headers, set }) => {
         const auth = await guard(headers, ["worker", "admin"], true, {
-          resource: "person",
-          action: "enable-login",
+          resource: PolicyResource.people,
+          action: PeopleAction.login,
         });
         if (auth.kind !== "ok") {
           set.status = auth.status;
@@ -575,8 +576,8 @@ export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: Peo
     // LGPD Art. 18 V (eliminacao). Irreversivel e cross-system → superadmin.
     .delete("/people/:personId", async ({ params, headers, set }) => {
       const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "erase",
+        resource: PolicyResource.people,
+        action: PeopleAction.delete,
       });
       if (auth.kind !== "ok") {
         set.status = auth.status;

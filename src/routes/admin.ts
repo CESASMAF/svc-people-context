@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
+import { PeopleAction, PolicyResource } from "../middleware/policy-actions.ts";
 import type { IdpClient } from "../idp/index.ts";
 import { reconcileIdpState, type ReconcilablePerson } from "../application/index.ts";
 
@@ -23,8 +24,8 @@ export const createAdminRoutes = ({ people, guard, idp }: AdminRouteDeps) =>
     // manutencao → restrita a superadmin. Pode ser disparada por cron externo.
     .post("/reconcile-idp", async ({ headers, set }) => {
       const auth = await guard(headers, ["admin"], true, {
-        resource: "person",
-        action: "reconcile",
+        resource: PolicyResource.people,
+        action: PeopleAction.reconcile,
       });
       if (auth.kind !== "ok") {
         set.status = auth.status;

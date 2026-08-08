@@ -1,13 +1,17 @@
 import { describe, it, expect } from "bun:test";
 import { Elysia } from "elysia";
 import { createPeopleRoutes } from "../../src/routes/people.ts";
-import { createFakePersonRepository, createFakeRoleRepository } from "../routes/fake-repositories.ts";
+import {
+  createFakePersonRepository,
+  createFakeRoleRepository,
+} from "../routes/fake-repositories.ts";
 import { createRejectingAuthGuard } from "../routes/fake-auth.ts";
 import { createFakePublisher } from "../routes/fake-publisher.ts";
 import { createNoopIdpClient } from "../../src/idp/index.ts";
 import { createAuthGuard } from "../../src/middleware/auth.ts";
 import type { JwtVerifier } from "../../src/middleware/jwt.ts";
 import type { CerbosClient } from "../../src/middleware/cerbos.ts";
+import { PeopleAction, PolicyResource } from "../../src/middleware/policy-actions.ts";
 
 const setup = () => {
   const people = createFakePersonRepository();
@@ -131,15 +135,16 @@ describe("Auth guard — Cerbos (PDP) defense-in-depth", () => {
     return {
       calls,
       client: {
-        check: async (roles, resource, action, principalId) => {
-          calls.push({ roles, resource, action, principalId });
+        check: async (input) => {
+          calls.push(input);
           return decision;
         },
       },
     };
   };
 
-  const AUTHZ = { resource: "person", action: "create" } as const;
+  // Vocabulário REAL da policy (`people.yaml`) — ver tests/middleware/cerbos-contrato.test.ts.
+  const AUTHZ = { resource: PolicyResource.people, action: PeopleAction.create } as const;
   const headers = { authorization: "Bearer fake", "x-actor-id": "actor" };
 
   it("DENY explícito do Cerbos → forbidden (mesmo com role local válida)", async () => {
@@ -150,7 +155,7 @@ describe("Auth guard — Cerbos (PDP) defense-in-depth", () => {
     // passou o principal (sub) e os grupos como roles p/ o decision log
     expect(cerbos.calls).toHaveLength(1);
     expect(cerbos.calls[0]).toMatchObject({
-      resource: "person",
+      resource: "people",
       action: "create",
       principalId: "actor-1",
       roles: ["people-context:admin"],
