@@ -196,3 +196,92 @@ describe("PUT /people/:id/roles/:roleId/(de|re)activate — atributos enviados a
     expect(ativos).toHaveLength(1);
   });
 });
+
+// ─── Regras de papel no CÓDIGO, não só na policy ────────────────
+//
+// O PDP e fail-open por desenho: sem CERBOS_URL, ou com o Cerbos fora do ar, `authz` defere
+// e quem decide e o guard local. Ate 2026-08-08 as rotas PUT nao tinham ROL-006 nem ROL-008 —
+// so o POST tinha —, entao com o PDP deferindo um `people-context:admin` REATIVAVA uma
+// atribuicao `superadmin` desativada e virava superadmin nos tres servicos.
+//
+// `deferindo` = exatamente o cenario perigoso: PDP que nao barra nada.
+const deferindo: AuthzCheck = async () => null;
+
+describe("PUT (de|re)activate — regras de papel sem depender do PDP", () => {
+  it("admin comum NAO reativa uma atribuicao superadmin (ROL-006)", async () => {
+    const { app, people, roles } = setup(deferindo, "idp-caller");
+    const personId = await createPerson(app);
+    await people.setIdpUserId(personId, "idp-alvo", "alvo@test.com");
+    // a atribuicao superadmin ja existe e foi desativada — e o estado explorado
+    const roleId = (await roles.assign(personId, { system: "people-context", role: "superadmin" }))
+      .role.id;
+    await roles.deactivate(personId, roleId);
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    const body = await parseJson(res);
+    expect((body as unknown as { error: { code: string } }).error.code).toBe("ROL-006");
+    expect(await roles.listByPerson(personId, true)).toHaveLength(0);
+  });
+
+  it("admin comum NAO desativa a atribuicao superadmin de outra pessoa (ROL-006)", async () => {
+    const { app, people, roles } = setup(deferindo, "idp-caller");
+    const personId = await createPerson(app);
+    await people.setIdpUserId(personId, "idp-alvo", "alvo@test.com");
+    const roleId = (await roles.assign(personId, { system: "people-context", role: "superadmin" }))
+      .role.id;
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
+        method: "PUT",
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    // o unico superadmin continua sendo superadmin
+    expect(await roles.listByPerson(personId, true)).toHaveLength(1);
+  });
+
+  it("admin comum NAO reativa papel proprio (ROL-008)", async () => {
+    // caller e alvo sao a mesma identidade do IdP
+    const { app, people, roles } = setup(deferindo, "idp-caller");
+    const personId = await createPerson(app);
+    await people.setIdpUserId(personId, "idp-caller", "eu@test.com");
+    const roleId = (await roles.assign(personId, { system: "people-context", role: "admin" })).role
+      .id;
+    await roles.deactivate(personId, roleId);
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    const body = await parseJson(res);
+    expect((body as unknown as { error: { code: string } }).error.code).toBe("ROL-008");
+  });
+
+  it("papel comum de OUTRA pessoa segue reativavel (a regra nao virou trava geral)", async () => {
+    const { app, people, roles } = setup(deferindo, "idp-caller");
+    const personId = await createPerson(app);
+    await people.setIdpUserId(personId, "idp-alvo", "alvo@test.com");
+    const roleId = (await roles.assign(personId, { system: "people-context", role: "worker" })).role
+      .id;
+    await roles.deactivate(personId, roleId);
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {
+        method: "PUT",
+      }),
+    );
+
+    expect(res.status).toBe(204);
+    expect(await roles.listByPerson(personId, true)).toHaveLength(1);
+  });
+});

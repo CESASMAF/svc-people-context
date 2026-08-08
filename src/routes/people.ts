@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { RoleRepository } from "../repository/role-repository.ts";
-import type { AuthGuard } from "../middleware/auth.ts";
+import { hasSuperAdmin, type AuthGuard } from "../middleware/auth.ts";
 import { PeopleAction, PolicyResource } from "../middleware/policy-actions.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
@@ -18,7 +18,9 @@ const timestamp = () => new Date().toISOString();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CPF_RE = /^\d{11}$/;
 
-const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r === "superadmin");
+// Reexportado do guard: o bypass casa `superadmin` bare E `<system>:superadmin`, igual ao
+// derived role do Cerbos. Ter uma cópia por arquivo foi como as duas metades divergiram.
+const isSuperAdmin = hasSuperAdmin;
 
 interface PeopleRouteDeps {
   readonly people: PersonRepository;
