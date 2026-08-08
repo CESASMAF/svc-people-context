@@ -45,11 +45,19 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           return { success: false, error: { code: "PEO-001", message: validation.message } };
         }
 
+        // Idempotencia por CPF: reusar um CPF existente NAO cria pessoa — devolve a que ja existe.
+        // Responder 201 aqui mentia duas vezes (nada foi criado, e o id e de OUTRA pessoa) e o
+        // chamador nao tinha como distinguir: a tela navegava para a ficha alheia como se tivesse
+        // cadastrado, descartando em silencio o nome/nascimento digitados. 200 + `alreadyExisted`
+        // deixa o reuso explicito; criacao de verdade segue 201.
         if (body.cpf !== undefined && body.cpf !== "") {
           const existing = await people.findByCpf(body.cpf);
           if (existing !== null) {
-            set.status = 201;
-            return { data: { id: existing.id }, meta: { timestamp: timestamp() } };
+            set.status = 200;
+            return {
+              data: { id: existing.id, alreadyExisted: true, fullName: existing.fullName },
+              meta: { timestamp: timestamp() },
+            };
           }
         }
 
