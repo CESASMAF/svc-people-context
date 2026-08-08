@@ -14,6 +14,21 @@ export type AuthResult =
   | { readonly kind: "forbidden"; readonly status: 403; readonly response: AuthError }
   | { readonly kind: "missing-actor"; readonly status: 400; readonly response: AuthError };
 
+// ─── Bypass de superadmin ───────────────────────────────────────
+//
+// Casa `superadmin` bare E `<qualquer-coisa>:superadmin`, porque é assim que o Cerbos decide:
+// o derived role de `_common_roles.yaml` é
+//   P.roles.exists(r, r == "superadmin" || r.endsWith(":superadmin"))
+// e o comentário de lá diz, explicitamente, que o papel "pode vir sem sistema ou com qualquer
+// prefixo". A igualdade exata que estava aqui divergia dessa definição: uma identidade com
+// `people-context:superadmin` era CONCEDIDA pelo PDP e NEGADA pelo guard local, com um
+// AUTH-002 dizendo que faltava o papel `admin` — o superadmin trancado fora das rotas
+// administrativas por um erro que aponta para o lugar errado.
+//
+// Duas metades de um mesmo defense-in-depth precisam concordar sobre quem é superadmin.
+export const hasSuperAdmin = (roles: readonly string[]): boolean =>
+  roles.some((r) => r === "superadmin" || r.endsWith(":superadmin"));
+
 // ─── Auth guard (pure function — no framework coupling) ─────────
 
 export type AuthGuard = (
@@ -68,7 +83,7 @@ export const createAuthGuard =
 
     if (requiredRoles !== undefined && requiredRoles.length > 0) {
       // "superadmin" bypasses all role checks
-      const isSuperAdmin = auth.roles.some((r) => r === "superadmin");
+      const isSuperAdmin = hasSuperAdmin(auth.roles);
       if (!isSuperAdmin) {
         // Supports both simple ("admin") and composite ("social-care:admin") role keys.
         // A JWT role "social-care:admin" satisfies a guard requiring "admin".

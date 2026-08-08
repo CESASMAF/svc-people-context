@@ -1,13 +1,15 @@
 import { Elysia } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
-import type { AuthGuard } from "../middleware/auth.ts";
+import { hasSuperAdmin, type AuthGuard } from "../middleware/auth.ts";
 import { PeopleAction, PolicyResource } from "../middleware/policy-actions.ts";
 import type { IdpClient } from "../idp/index.ts";
 import { reconcileIdpState, type ReconcilablePerson } from "../application/index.ts";
 
 const timestamp = () => new Date().toISOString();
 
-const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r === "superadmin");
+// Reexportado do guard: o bypass casa `superadmin` bare E `<system>:superadmin`, igual ao
+// derived role do Cerbos. Ter uma cópia por arquivo foi como as duas metades divergiram.
+const isSuperAdmin = hasSuperAdmin;
 
 interface AdminRouteDeps {
   readonly people: PersonRepository;

@@ -192,3 +192,34 @@ describe("Auth guard — Cerbos (PDP) defense-in-depth", () => {
     expect(cerbos.calls).toHaveLength(0);
   });
 });
+
+// O bypass de superadmin precisa casar com o derived role do Cerbos (`_common_roles.yaml`):
+//   P.roles.exists(r, r == "superadmin" || r.endsWith(":superadmin"))
+// A igualdade exata que estava aqui trancava `<system>:superadmin` FORA das rotas admin — com
+// um AUTH-002 dizendo que faltava o papel `admin` — enquanto o PDP concederia. Duas metades do
+// mesmo defense-in-depth discordando sobre quem e superadmin.
+describe("Bypass de superadmin — mesma definicao do Cerbos", () => {
+  const fakeVerifier =
+    (roles: string[]): JwtVerifier =>
+    async () => ({ sub: "actor-1", roles });
+  const headers = { authorization: "Bearer fake", "x-actor-id": "actor" };
+
+  it("aceita `superadmin` bare", async () => {
+    const guard = createAuthGuard(fakeVerifier(["superadmin"]));
+    expect((await guard(headers, ["admin"])).kind).toBe("ok");
+  });
+
+  it("aceita `<system>:superadmin` (forma prevista em _common_roles.yaml)", async () => {
+    for (const r of ["people-context:superadmin", "social-care:superadmin"]) {
+      const guard = createAuthGuard(fakeVerifier([r]));
+      expect((await guard(headers, ["admin"])).kind).toBe("ok");
+    }
+  });
+
+  it("NAO aceita quem so parece superadmin", async () => {
+    for (const r of ["superadminx", "naosuperadmin", "admin:super"]) {
+      const guard = createAuthGuard(fakeVerifier([r]));
+      expect((await guard(headers, ["admin"])).kind).toBe("forbidden");
+    }
+  });
+});

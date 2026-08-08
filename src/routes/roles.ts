@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
 import type { RoleRepository } from "../repository/role-repository.ts";
-import type { AuthGuard, AuthzCheck } from "../middleware/auth.ts";
+import { hasSuperAdmin, type AuthGuard, type AuthzCheck } from "../middleware/auth.ts";
 import { PeopleAction, PolicyResource, RoleAction } from "../middleware/policy-actions.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
@@ -13,7 +13,41 @@ const timestamp = () => new Date().toISOString();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r === "superadmin");
+// Reexportado do guard: o bypass casa `superadmin` bare E `<system>:superadmin`, igual ao
+// derived role do Cerbos. Ter uma cópia por arquivo foi como as duas metades divergiram.
+const isSuperAdmin = hasSuperAdmin;
+
+// ─── Guarda local das rotas de PAPEL ─────────────────────────────
+//
+// O POST /roles sempre teve ROL-006 (só superadmin mexe no papel `superadmin`) e ROL-008
+// (ninguém atribui papel a si mesmo). As rotas PUT de (des)ativação NÃO tinham nenhuma das
+// duas: davam ROL-007 (escopo por sistema) e mais nada.
+//
+// Com o Cerbos ligado a policy cobre — mas o PDP é FAIL-OPEN por desenho (indisponível ou
+// `CERBOS_URL` ausente ⇒ defere ao guard local), então "a policy cobre" não é uma garantia.
+// Sem estas checagens, um `people-context:admin` reativava uma atribuição `superadmin`
+// desativada — inclusive a própria — e virava superadmin com bypass global nos três serviços.
+// O caminho inverso também abria: remover o papel do único superadmin e trancar a operação.
+//
+// Estas regras são as MESMAS do POST. Vivem no código, não só na policy, porque autorização
+// que depende de um serviço externo estar de pé não é autorização.
+type RegraDePapel = Readonly<{ code: string; message: string }>;
+
+function violacaoDeRegraDePapel(args: {
+  readonly callerRoles: readonly string[];
+  readonly callerSub: string;
+  readonly targetRole: string;
+  readonly targetIdpUserId: string | null;
+}): RegraDePapel | null {
+  if (isSuperAdmin(args.callerRoles)) return null;
+  if (args.targetRole === "superadmin") {
+    return { code: "ROL-006", message: "Only superadmin can assign superadmin role" };
+  }
+  if (args.targetIdpUserId !== null && args.targetIdpUserId === args.callerSub) {
+    return { code: "ROL-008", message: "Cannot assign roles to yourself" };
+  }
+  return null;
+}
 
 // Extrai sistemas onde o caller tem "admin" — ex: ["social-care:admin"] -> ["social-care"]
 const adminSystems = (roles: readonly string[]): readonly string[] =>
@@ -219,6 +253,18 @@ export const createRolesRoutes = ({
 
       const person = await people.findById(params.personId);
 
+      // ROL-006/ROL-008 no CÓDIGO — o PDP é fail-open e não pode ser a única barreira.
+      const violacao = violacaoDeRegraDePapel({
+        callerRoles: auth.auth.roles,
+        callerSub: auth.auth.sub,
+        targetRole: existingRole.role,
+        targetIdpUserId: person?.idpUserId ?? null,
+      });
+      if (violacao !== null) {
+        set.status = 403;
+        return { success: false, error: violacao };
+      }
+
       // PDP (2a fase) — ver a rota de atribuição.
       const denied = await authz(auth.auth, PolicyResource.role, RoleAction.deactivate, {
         system: existingRole.system,
@@ -298,6 +344,19 @@ export const createRolesRoutes = ({
       }
 
       const person = await people.findById(params.personId);
+
+      // ROL-006/ROL-008 no CÓDIGO — reativar uma atribuição `superadmin` desativada era o
+      // caminho mais curto para um admin comum virar superadmin.
+      const violacao = violacaoDeRegraDePapel({
+        callerRoles: auth.auth.roles,
+        callerSub: auth.auth.sub,
+        targetRole: existingRole.role,
+        targetIdpUserId: person?.idpUserId ?? null,
+      });
+      if (violacao !== null) {
+        set.status = 403;
+        return { success: false, error: violacao };
+      }
 
       // PDP (2a fase) — ver a rota de atribuição.
       const denied = await authz(auth.auth, PolicyResource.role, RoleAction.reactivate, {
