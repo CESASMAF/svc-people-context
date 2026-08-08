@@ -20,7 +20,7 @@ const setup = (guardRoles?: string[], guardSub?: string) => {
   // People routes use a permissive guard so createPerson helper works
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
-    .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
+    .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
     .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
   return { app, people, roles, publisher };
 };
@@ -33,7 +33,7 @@ const setupWithFakeIdp = (guardRoles: string[], guardSub = "test-user") => {
   const idp = createFakeIdpClient();
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
-    .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
+    .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
     .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
   return { app, people, roles, publisher, idp };
 };
@@ -489,7 +489,7 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     const idp = createNoopIdpClient();
     const people = createFakePersonRepository();
     const app = new Elysia()
-      .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
+      .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
       .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
 
     const res = await app.handle(
@@ -564,7 +564,7 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     const idp = createNoopIdpClient();
     const people = createFakePersonRepository();
     const app = new Elysia()
-      .use(createPeopleRoutes({ people, guard: peopleGuard, publisher, idp }))
+      .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
       .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
 
     const res = await app.handle(

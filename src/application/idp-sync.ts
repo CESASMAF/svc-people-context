@@ -113,6 +113,11 @@ export interface ProvisionUserInput {
   readonly email: string;
   readonly initialPassword?: string;
   readonly attributes: ACDGUserAttributes;
+  // Papeis JA atribuidos a pessoa (`<sistema>:<papel>`). Sem semear aqui, quem ganhou papel ANTES
+  // de ter login era provisionado com `roles: []` e logava sem permissao nenhuma: os papeis ficavam
+  // so na fonte da verdade (system_roles) e nunca no IdP, que e de onde sai a claim `groups`.
+  // O sync incremental do assign nao cobria isso — ele so roda quando ja existe `idpUserId`.
+  readonly groups?: readonly string[];
 }
 
 export interface ProvisionedUser {
@@ -131,6 +136,7 @@ export const provisionUserInIdp = async (
     ...(input.initialPassword !== undefined && input.initialPassword !== ""
       ? { password: input.initialPassword }
       : {}),
+    ...(input.groups !== undefined ? { groups: input.groups } : {}),
     attributes: input.attributes,
   });
   if (!createResult.ok) return createResult;

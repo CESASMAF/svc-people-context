@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { Elysia } from "elysia";
 import { createPeopleRoutes } from "../../src/routes/people.ts";
-import { createFakePersonRepository } from "../routes/fake-repositories.ts";
+import { createFakePersonRepository, createFakeRoleRepository } from "../routes/fake-repositories.ts";
 import { createRejectingAuthGuard } from "../routes/fake-auth.ts";
 import { createFakePublisher } from "../routes/fake-publisher.ts";
 import { createNoopIdpClient } from "../../src/idp/index.ts";
@@ -11,10 +11,11 @@ import type { CerbosClient } from "../../src/middleware/cerbos.ts";
 
 const setup = () => {
   const people = createFakePersonRepository();
+  const roles = createFakeRoleRepository();
   const guard = createRejectingAuthGuard();
   const publisher = createFakePublisher();
   const idp = createNoopIdpClient();
-  const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
+  const app = new Elysia().use(createPeopleRoutes({ people, roles, guard, publisher, idp }));
   return { app };
 };
 

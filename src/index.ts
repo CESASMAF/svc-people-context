@@ -54,7 +54,7 @@ relay.start();
 
 const app = new Elysia()
   .use(createHealthRoutes({ sql, relay }))
-  .use(createPeopleRoutes({ people, guard, publisher, idp }))
+  .use(createPeopleRoutes({ people, roles, guard, publisher, idp }))
   .use(createRolesRoutes({ people, roles, guard, publisher, idp }))
   .use(createAdminRoutes({ people, guard, idp }))
   .listen({ port: env.port, hostname: env.host });

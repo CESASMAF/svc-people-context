@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
+import type { RoleRepository } from "../repository/role-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
@@ -20,12 +21,15 @@ const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r 
 
 interface PeopleRouteDeps {
   readonly people: PersonRepository;
+  // Necessario para SEMEAR no IdP os papeis que a pessoa ja tem ao criar o login — ver o uso na
+  // provisao retroativa.
+  readonly roles: RoleRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
   readonly idp: IdpClient;
 }
 
-export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRouteDeps) =>
+export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: PeopleRouteDeps) =>
   new Elysia({ prefix: "/api/v1" })
     .post(
       "/people",
@@ -513,11 +517,18 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           };
         }
 
+        // Papeis JA atribuidos entram na criacao da identidade. Sem isto, quem ganhou papel ANTES de
+        // ter login era provisionado com `roles: []` e logava sem permissao nenhuma — o sync do
+        // assign so roda quando `idpUserId` ja existe, entao esses papeis nunca chegavam ao IdP.
+        const existing = await roles.listByPerson(person.id, true);
+        const groups = existing.map((r) => `${r.system}:${r.role}`);
+
         const provision = await provisionUserInIdp(idp, {
           username: usernameFromEmail(email),
           name: person.fullName,
           email,
           initialPassword: body.initialPassword,
+          ...(groups.length > 0 ? { groups } : {}),
           attributes: {
             person_id: person.id,
             cpf: person.cpf ?? undefined,
