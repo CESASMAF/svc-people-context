@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { Elysia } from "elysia";
 import { createPeopleRoutes } from "../../src/routes/people.ts";
-import { createFakePersonRepository } from "./fake-repositories.ts";
+import { createFakePersonRepository, createFakeRoleRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
 import { createFakeIdpClient, type FakeIdpOverrides } from "./fake-idp.ts";
@@ -9,10 +9,11 @@ import { parseJson, dataAs, type IdData } from "./test-types.ts";
 
 const setup = (idpOverrides: FakeIdpOverrides = {}) => {
   const people = createFakePersonRepository();
+  const roles = createFakeRoleRepository();
   const guard = createFakeAuthGuard();
   const publisher = createFakePublisher();
   const idp = createFakeIdpClient(idpOverrides);
-  const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
+  const app = new Elysia().use(createPeopleRoutes({ people, roles, guard, publisher, idp }));
   return { app, people, publisher, idp };
 };
 

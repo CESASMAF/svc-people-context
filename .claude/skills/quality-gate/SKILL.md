@@ -9,8 +9,7 @@ allowed-tools: Bash(bun *), Bash(bunx *), Read, Glob, Grep
 
 Valida a saúde do repositório `people-context` antes de qualquer merge. Executa na ordem exata abaixo e para no primeiro bloqueio — não pula etapas.
 
-> É o **gate W3** do pipeline SDD (Princípios I/II). Equivale a `bun run verify` e à skill
-> `/speckit-verify`. Atalho: `bun run verify` roda os 5 passos encadeados.
+> Atalho: `bun run verify` roda os 5 passos encadeados.
 
 ## Pré-condição
 
@@ -21,7 +20,7 @@ bun run typecheck     → tsc --noEmit
 bun run format:check  → prettier --check .
 bun run lint          → eslint .
 bun test              → bun test
-bun run coverage      → bun test --coverage 2>&1 | tee /dev/stderr | node scripts/check-coverage.js
+bun run coverage      → bun test --coverage 2>&1 | tee /dev/stderr | bun scripts/check-coverage.js
 ```
 
 Se algum script estiver ausente, reporte `⚠️ PENDENTE — script não encontrado` para essa etapa e continue com as demais.

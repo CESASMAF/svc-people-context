@@ -66,14 +66,21 @@ export const createPersonRepository = (sql: Sql): PersonRepository => {
     },
 
     update: async (id, input) => {
-      // email: COALESCE preserva o valor atual quando o update nao informa email
-      // (PUT sem email nao apaga o login existente). cpf segue o padrao set-or-null.
+      // OMISSAO NUNCA DESTROI. cpf e email usam COALESCE: um PUT que nao informa o campo preserva
+      // o valor atual. Antes o cpf era set-or-null e a tela de edicao — que nem exibia o CPF —
+      // apagava a PII a cada "salvar" so por nao reenviar o campo.
+      // Apagar CPF/email de proposito e erasure (DELETE /people/:id), que e auditado.
+      //
+      // A normalizacao "" → null e necessaria: `?? null` deixaria a string vazia passar, e o
+      // COALESCE gravaria '' por cima do valor atual (vazio nao e NULL em SQL).
+      const cpf = input.cpf === undefined || input.cpf === "" ? null : input.cpf;
+      const email = input.email === undefined || input.email === "" ? null : input.email;
       const [row] = await sql<Person[]>`
       UPDATE people
       SET full_name = ${input.fullName},
-          cpf = ${input.cpf ?? null},
+          cpf = COALESCE(${cpf}, cpf),
           birth_date = ${input.birthDate},
-          email = COALESCE(${input.email ?? null}, email),
+          email = COALESCE(${email}, email),
           updated_at = now()
       WHERE id = ${id}
       RETURNING ${fields}

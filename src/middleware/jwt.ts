@@ -10,16 +10,20 @@ export interface AuthContext {
 
 export type JwtVerifier = (token: string) => Promise<AuthContext | null>;
 
-// ─── Role claim extraction (Authentik) ─────────────────────────
+// ─── Role claim extraction ─────────────────────────────────────
 //
-// No Authentik os papeis sao modelados como GRUPOS homonimos a `system:role`
-// (ADR-029) mais `superadmin`, e chegam no token como array de nomes na claim
-// `groups` (ref-authentik: providers/oauth2 "Default & special scopes" — o scope
-// `profile` inclui group membership; k8s usa `oidc-groups-claim: groups`).
-// O nome da claim e configuravel via OIDC_ROLES_CLAIM.
+// Os papeis chegam como array de nomes na claim `groups`, homonimos a
+// `<system>:<role>` mais `superadmin` (ADR-029). O nome da claim e configuravel
+// via OIDC_ROLES_CLAIM.
+//
+// O formato e o MESMO no Authentik e no Ory Hydra, e e por isso que esta funcao
+// sobreviveu a migracao sem alteracao. Mas nao confunda: o provisionamento
+// deste servico ja fala com o **Kratos** (`src/idp/`, commit eabef49) enquanto
+// a verificacao de token aponta para o issuer configurado em `config/env.ts`.
+// Ao mexer em auth, leia os dois — o servico esta partido entre os estagios.
 const ROLES_CLAIM = env.auth.rolesClaim;
 
-// Aceita array de strings (formato Authentik). Filtra nao-strings defensivamente.
+// Aceita array de strings. Filtra nao-strings defensivamente.
 const extractRolesFrom = (source: Readonly<Record<string, unknown>>): readonly string[] => {
   const claim = source[ROLES_CLAIM];
   if (!Array.isArray(claim)) return [];

@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import type { PersonRepository } from "../repository/person-repository.ts";
+import type { RoleRepository } from "../repository/role-repository.ts";
 import type { AuthGuard } from "../middleware/auth.ts";
 import type { EventPublisher } from "../events/publisher.ts";
 import type { IdpClient } from "../idp/index.ts";
@@ -20,12 +21,15 @@ const isSuperAdmin = (roles: readonly string[]): boolean => roles.some((r) => r 
 
 interface PeopleRouteDeps {
   readonly people: PersonRepository;
+  // Necessario para SEMEAR no IdP os papeis que a pessoa ja tem ao criar o login — ver o uso na
+  // provisao retroativa.
+  readonly roles: RoleRepository;
   readonly guard: AuthGuard;
   readonly publisher: EventPublisher;
   readonly idp: IdpClient;
 }
 
-export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRouteDeps) =>
+export const createPeopleRoutes = ({ people, roles, guard, publisher, idp }: PeopleRouteDeps) =>
   new Elysia({ prefix: "/api/v1" })
     .post(
       "/people",
@@ -45,11 +49,19 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           return { success: false, error: { code: "PEO-001", message: validation.message } };
         }
 
+        // Idempotencia por CPF: reusar um CPF existente NAO cria pessoa — devolve a que ja existe.
+        // Responder 201 aqui mentia duas vezes (nada foi criado, e o id e de OUTRA pessoa) e o
+        // chamador nao tinha como distinguir: a tela navegava para a ficha alheia como se tivesse
+        // cadastrado, descartando em silencio o nome/nascimento digitados. 200 + `alreadyExisted`
+        // deixa o reuso explicito; criacao de verdade segue 201.
         if (body.cpf !== undefined && body.cpf !== "") {
           const existing = await people.findByCpf(body.cpf);
           if (existing !== null) {
-            set.status = 201;
-            return { data: { id: existing.id }, meta: { timestamp: timestamp() } };
+            set.status = 200;
+            return {
+              data: { id: existing.id, alreadyExisted: true, fullName: existing.fullName },
+              meta: { timestamp: timestamp() },
+            };
           }
         }
 
@@ -505,11 +517,18 @@ export const createPeopleRoutes = ({ people, guard, publisher, idp }: PeopleRout
           };
         }
 
+        // Papeis JA atribuidos entram na criacao da identidade. Sem isto, quem ganhou papel ANTES de
+        // ter login era provisionado com `roles: []` e logava sem permissao nenhuma — o sync do
+        // assign so roda quando `idpUserId` ja existe, entao esses papeis nunca chegavam ao IdP.
+        const existing = await roles.listByPerson(person.id, true);
+        const groups = existing.map((r) => `${r.system}:${r.role}`);
+
         const provision = await provisionUserInIdp(idp, {
           username: usernameFromEmail(email),
           name: person.fullName,
           email,
           initialPassword: body.initialPassword,
+          ...(groups.length > 0 ? { groups } : {}),
           attributes: {
             person_id: person.id,
             cpf: person.cpf ?? undefined,

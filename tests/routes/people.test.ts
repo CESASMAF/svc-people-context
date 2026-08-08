@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { Elysia } from "elysia";
 import { createPeopleRoutes } from "../../src/routes/people.ts";
-import { createFakePersonRepository } from "./fake-repositories.ts";
+import { createFakePersonRepository, createFakeRoleRepository } from "./fake-repositories.ts";
 import { createFakeAuthGuard } from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
 import { createNoopIdpClient } from "../../src/idp/index.ts";
@@ -9,10 +9,11 @@ import { parseJson, dataAs, dataAsArray, type IdData, type PersonData } from "./
 
 const setup = () => {
   const people = createFakePersonRepository();
+  const roles = createFakeRoleRepository();
   const guard = createFakeAuthGuard();
   const publisher = createFakePublisher();
   const idp = createNoopIdpClient();
-  const app = new Elysia().use(createPeopleRoutes({ people, guard, publisher, idp }));
+  const app = new Elysia().use(createPeopleRoutes({ people, roles, guard, publisher, idp }));
   return { app, people, publisher };
 };
 
@@ -59,9 +60,15 @@ describe("POST /api/v1/people", () => {
         json({ fullName: "Ana C.", cpf: "52998224725", birthDate: "1990-05-15" }),
       ),
     );
-    expect(second.status).toBe(201);
+    // 200, nao 201: nada foi criado. O chamador PRECISA distinguir reuso de criacao — respondendo
+    // 201 sem sinal, a tela navegava para a ficha de OUTRA pessoa como se tivesse cadastrado.
+    expect(second.status).toBe(200);
     const secondBody = await parseJson(second);
-    expect(dataAs<IdData>(secondBody).id).toBe(dataAs<IdData>(firstBody).id);
+    const data = dataAs<IdData & { alreadyExisted?: boolean; fullName?: string }>(secondBody);
+    expect(data.id).toBe(dataAs<IdData>(firstBody).id);
+    expect(data.alreadyExisted).toBe(true);
+    // devolve o nome de QUEM ja tem o CPF (a pessoa preexistente), nao o que veio no request
+    expect(data.fullName).toBe("Ana Costa");
     // No new event on dedup
     expect(publisher.published.length).toBe(1);
   });

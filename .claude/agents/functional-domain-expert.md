@@ -69,7 +69,7 @@ const ok = { kind: "ok" } as const satisfies ValidationResult;
 const fail = (message: string): ValidationResult => ({ kind: "error", message });
 ```
 
-**Nunca** use `{ ok: boolean }` — esse é o `AuthentikResult<T>` da camada de adapters. Os dois Result têm discriminantes diferentes e não se misturam.
+**Nunca** use `{ ok: boolean }` — esse é o `IdpResult<T>` da camada de adapters. Os dois Result têm discriminantes diferentes e não se misturam.
 
 ### Funções de validação — padrão real
 
@@ -132,7 +132,7 @@ O domínio é **PURO** — não depende de nenhuma biblioteca externa, IdP, banc
 - `throw` → domínio nunca lança; retorna `ValidationResult` com `kind: "error"`.
 - Importar de fora de `src/domain/` → boundary violation; `domain/` só importa de si mesmo.
 - Lógica de I/O (fetch, SQL, NATS publish) dentro de qualquer função de domínio.
-- Misturar `AuthentikResult<T>` (discriminante `ok`) com `ValidationResult` (discriminante `kind`).
+- Misturar `IdpResult<T>` (discriminante `ok`) com `ValidationResult` (discriminante `kind`).
 - Smart constructor retornando `ValidationResult` em vez de `T | null`.
 
 ## Sinais de que esta página está em ação

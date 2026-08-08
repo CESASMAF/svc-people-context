@@ -79,8 +79,10 @@ export const createJwtVerifier = (): JwtVerifier => {
 
 Pontos críticos:
 - **RS256 / JWKS remoto** via `jose.jwtVerify` — chaves buscadas em `env.auth.jwksUrl`.
-- **Role claim Zitadel**: `urn:zitadel:iam:org:project:<projectId>:roles` — extraído por
-  chave exata primeiro, depois pattern match `ROLE_CLAIM_PATTERN`.
+- **Role claim**: array de nomes na claim `groups` (nome configurável via
+  `OIDC_ROLES_CLAIM`), homônimos a `<system>:<role>` mais `superadmin`.
+  `extractRolesFrom` filtra não-strings defensivamente. O formato antigo do
+  Zitadel (`urn:zitadel:...`) **não é mais lido**.
 - **Introspection RFC 7662** (fallback): só ativada quando `roles.length === 0` e
   `allowedServiceAccounts.has(sub)`. Timeout configurável via `env.auth.introspectTimeoutMs`
   (default 5s). Requer `introspectUrl + introspectClientId + introspectClientSecret`; se
@@ -130,29 +132,29 @@ Regras RBAC do `security-lgpd.md`:
 
 ## B) idp/ — Authentik Management API v3
 
-### `createAuthentikClient({baseUrl, token})` — fábrica do cliente
+### `createIdpClient({baseUrl, token})` — fábrica do cliente
 
 ```typescript
 // src/idp/client.ts
-export const createAuthentikClient = (
-  config: AuthentikClientConfig,
-): AuthentikClient => ({
+export const createIdpClient = (
+  config: IdpClientConfig,
+): IdpClient => ({
   createUser: (input) => request<UserResponse>(config, "POST", "/api/v3/core/users/", { ... }),
   getUser:    (userPk) => request<UserResponse>(config, "GET", `/api/v3/core/users/${userPk}/`),
   // ... 14 métodos
 });
 ```
 
-### `AuthentikResult<T>` — boundary no-throw (ADR-014)
+### `IdpResult<T>` — boundary no-throw (ADR-014)
 
 ```typescript
 // src/idp/types.ts
-export type AuthentikResult<T> =
+export type IdpResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly code: number; readonly message: string };
 ```
 
-Todo método do cliente retorna `AuthentikResult<T>`. O `try/catch` existe **apenas** na
+Todo método do cliente retorna `IdpResult<T>`. O `try/catch` existe **apenas** na
 função `request()` interna — nunca propaga exceção para fora. Mapear erros do Authentik
 para `IDP-00x` genérico antes de devolver ao handler (HIGH-7: erro do Authentik não
 vaza no response HTTP).
@@ -203,7 +205,7 @@ export type ACDGUserAttributes = {
 Sem index signature `[key: string]: unknown` — bloqueia mass assignment de chaves
 arbitrárias que poderiam virar claims JWT via property mapping `acdg-roles`.
 
-### `createNoopAuthentikClient()` — testes / IdP desabilitado
+### `createNoopIdpClient()` — testes / IdP desabilitado
 
 Retorna stubs `ok:true` para todos os métodos. Usar quando `AUTHENTIK_URL` ou
 `AUTHENTIK_TOKEN` não estão definidos em ambiente de teste.
@@ -226,26 +228,21 @@ NATS. Nenhuma rota devolve `link` ao browser.
 
 ---
 
-## Estado de transição JWT Zitadel → Authentik (PENDÊNCIA CONHECIDA)
+## Onde o IdP está — leia antes de mexer em auth
 
-**HOJE** (`src/middleware/jwt.ts`):
-- `env.auth.jwksUrl` aponta para o JWKS do **Zitadel** (`auth.acdgbrasil.com.br`).
-- Role claim: `urn:zitadel:iam:org:project:<id>:roles` (formato Zitadel).
-- `extractRoles()` usa `ROLE_CLAIM_PATTERN` para este formato específico.
+**Este serviço está partido entre dois estágios.** Não assuma nenhum dos dois:
 
-**ALVO do deploy BV** (ADR-009):
-- **Authentik** self-hosted (`auth.acdg-bv.org.br`) — o `idp/client.ts` JÁ é Authentik.
-- JWKS endpoint, issuer e formato de role claims do Authentik são **diferentes**.
-- A migração da verificação JWT Zitadel→Authentik é **pendência conhecida** e requer:
-  1. Consultar `subagent_type: "acdg-ref:ref-authentik"` para obter:
-     - URL do JWKS do Authentik (`/application/o/<slug>/jwks/`)
-     - Issuer esperado
-     - Formato do role claim no JWT (property mapping `acdg-roles`)
-  2. Atualizar `env.auth.jwksUrl`, `env.auth.issuer` e `extractRoles()` para o novo claim.
-  3. Confirmar no código real (`src/config/env.ts`) qual é o estado atual antes de assumir.
+| Camada | Estado (verificado 2026-08-06) |
+|---|---|
+| **Provisionamento** (`src/idp/`) | **Ory Kratos.** `client.ts` fala a Admin API (`:4434`), sem auth própria — a proteção é isolação de rede. Um usuário é `identity.id` (UUID); papéis vivem em `metadata_public.groups`, editados por read-modify-write. |
+| **AuthZ** (`src/middleware/`) | `AuthGuard` local + **Cerbos** como defense-in-depth (feature-flag `CERBOS_URL`, fail-open). |
+| **Verificação de JWT** (`src/middleware/jwt.ts`) | Ainda comenta **Authentik** na extração da claim `groups`. Não acompanhou a migração do provisionamento. |
+| Zitadel | Só sobrevive como o atributo `legacy_zitadel_sub` de users migrados (ADR-031). |
 
-**Não assuma que auth já é Authentik.** Leia `src/middleware/jwt.ts` e
-`src/config/env.ts` antes de qualquer mudança de auth.
+Ao mexer em auth: leia `src/middleware/jwt.ts`, `src/config/env.ts` e
+`src/idp/client.ts` — nesta ordem — e confirme no código. Quando a verificação
+de JWT migrar para o Hydra, os pontos de quebra são o `jwksUrl`/`issuer` em
+`env.ts` e o formato do claim em `extractRolesFrom`.
 
 ---
 
@@ -270,7 +267,7 @@ Regra: passe a pergunta como **texto** (o externo não vê o código).
    o link vai APENAS no evento NATS via Outbox.
 3. Usar `uid` como argumento de mutação DRF — sempre resolver para `pk` primeiro.
 4. Assumir que `jwt.ts` já valida Authentik — leia o código antes de modificar.
-5. `throw` fora do `request()` interno — todo erro do cliente é `AuthentikResult`.
+5. `throw` fora do `request()` interno — todo erro do cliente é `IdpResult`.
 6. Index signature em `ACDGUserAttributes` — shape fechado (AppSec CRITICAL-3).
 7. `findUserByUid` como filtro confiável — o filtro `?uid=` no DRF pode não funcionar;
    use `findUserByUsername` ou resolva via `pk` quando possível.
@@ -285,7 +282,7 @@ Regra: passe a pergunta como **texto** (o externo não vê o código).
 
 - `grep -rn "jwtVerify\|createRemoteJWKSet" src/` → só em `src/middleware/jwt.ts`.
 - `grep -rn "createAuthGuard\|AuthResult" src/` → só em `src/middleware/auth.ts` e nos handlers.
-- `grep -rn "createAuthentikClient\|createNoopAuthentikClient" src/` → só em `src/idp/client.ts` e no bootstrap.
+- `grep -rn "createIdpClient\|createNoopIdpClient" src/` → só em `src/idp/client.ts` e no bootstrap.
 - `grep -rn "throw " src/idp src/middleware` → vazio (exceto `validateJwks` em produção).
 - `grep -rn ": any" src/idp src/middleware` → vazio.
 - `grep -rn "\"link\"" src/routes` → vazio (link de reset nunca no response).
@@ -294,8 +291,13 @@ Regra: passe a pergunta como **texto** (o externo não vê o código).
 
 ## Changelog
 
-- **2026-05-27**: Agente criado. Ancorado em `src/middleware/jwt.ts` (Zitadel JWKS +
-  introspection RFC 7662 + `createAuthGuard` discriminado) e `src/idp/client.ts`
-  (`createAuthentikClient` com 14 métodos + `AuthentikResult<T>` no-throw + distinção
-  `pk` vs `uid`). Pendência de transição JWT Zitadel→Authentik marcada e referenciada
-  para `acdg-ref:ref-authentik`.
+- **2026-08-06**: Provisionamento migrado para **Ory Kratos** + guard Cerbos
+  (commit `eabef49`). A seção "Estado de transição Zitadel → Authentik
+  (PENDÊNCIA CONHECIDA)" foi removida: descrevia como pendente uma migração já
+  feita, e afirmava que `jwt.ts` validava JWKS do Zitadel — o claim lido é
+  `groups` há tempos. No lugar, uma tabela do estado real por camada, porque o
+  serviço está de fato partido: `idp/` em Kratos, `jwt.ts` ainda comentando
+  Authentik.
+- **2026-05-27**: Agente criado. *(Estado histórico: ancorava em `jwt.ts` com
+  JWKS do Zitadel e em `createIdpClient` com `IdpResult<T>` e a
+  distinção `pk` vs `uid` da Management API.)*
