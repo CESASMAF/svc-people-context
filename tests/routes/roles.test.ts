@@ -3,7 +3,11 @@ import { Elysia } from "elysia";
 import { createPeopleRoutes } from "../../src/routes/people.ts";
 import { createRolesRoutes } from "../../src/routes/roles.ts";
 import { createFakePersonRepository, createFakeRoleRepository } from "./fake-repositories.ts";
-import { createFakeAuthGuard, createFakeAuthGuardWithRoles } from "./fake-auth.ts";
+import {
+  createDeferringAuthzCheck,
+  createFakeAuthGuard,
+  createFakeAuthGuardWithRoles,
+} from "./fake-auth.ts";
 import { createFakePublisher } from "./fake-publisher.ts";
 import { createNoopIdpClient } from "../../src/idp/index.ts";
 import { createFakeIdpClient } from "./fake-idp.ts";
@@ -21,7 +25,16 @@ const setup = (guardRoles?: string[], guardSub?: string) => {
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
     .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
-    .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
+    .use(
+      createRolesRoutes({
+        people,
+        roles,
+        guard,
+        authz: createDeferringAuthzCheck(),
+        publisher,
+        idp,
+      }),
+    );
   return { app, people, roles, publisher };
 };
 
@@ -34,7 +47,16 @@ const setupWithFakeIdp = (guardRoles: string[], guardSub = "test-user") => {
   const peopleGuard = createFakeAuthGuard();
   const app = new Elysia()
     .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
-    .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
+    .use(
+      createRolesRoutes({
+        people,
+        roles,
+        guard,
+        authz: createDeferringAuthzCheck(),
+        publisher,
+        idp,
+      }),
+    );
   return { app, people, roles, publisher, idp };
 };
 
@@ -490,7 +512,16 @@ describe("PUT roles/:roleId/deactivate — authz e IdP sync", () => {
     const people = createFakePersonRepository();
     const app = new Elysia()
       .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
-      .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
+      .use(
+        createRolesRoutes({
+          people,
+          roles,
+          guard,
+          authz: createDeferringAuthzCheck(),
+          publisher,
+          idp,
+        }),
+      );
 
     const res = await app.handle(
       new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/deactivate`, {
@@ -565,7 +596,16 @@ describe("PUT roles/:roleId/reactivate — authz e IdP sync", () => {
     const people = createFakePersonRepository();
     const app = new Elysia()
       .use(createPeopleRoutes({ people, roles, guard: peopleGuard, publisher, idp }))
-      .use(createRolesRoutes({ people, roles, guard, publisher, idp }));
+      .use(
+        createRolesRoutes({
+          people,
+          roles,
+          guard,
+          authz: createDeferringAuthzCheck(),
+          publisher,
+          idp,
+        }),
+      );
 
     const res = await app.handle(
       new Request(`http://localhost/api/v1/people/${personId}/roles/${roleId}/reactivate`, {

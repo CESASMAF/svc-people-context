@@ -4,7 +4,7 @@ import { createDb, migrate } from "./repository/db.ts";
 import { createPersonRepository } from "./repository/person-repository.ts";
 import { createRoleRepository } from "./repository/role-repository.ts";
 import { createJwtVerifier, validateJwks } from "./middleware/jwt.ts";
-import { createAuthGuard } from "./middleware/auth.ts";
+import { createAuthGuard, createAuthzCheck } from "./middleware/auth.ts";
 import { createCerbosClient, createNoopCerbosClient } from "./middleware/cerbos.ts";
 import { createOutboxPublisher } from "./events/publisher.ts";
 import { createOutboxRelay, createNoopRelay } from "./events/outbox-relay.ts";
@@ -30,6 +30,7 @@ if (env.cerbos.url !== undefined) {
   console.log("[cerbos] CERBOS_URL não setado — RBAC apenas via guard local");
 }
 const guard = createAuthGuard(createJwtVerifier(), cerbos);
+const authz = createAuthzCheck(cerbos);
 const publisher = createOutboxPublisher(sql);
 
 // IdP client: Ory Kratos Admin API. A Admin API não exige Bearer (isolação de
@@ -55,7 +56,7 @@ relay.start();
 const app = new Elysia()
   .use(createHealthRoutes({ sql, relay }))
   .use(createPeopleRoutes({ people, roles, guard, publisher, idp }))
-  .use(createRolesRoutes({ people, roles, guard, publisher, idp }))
+  .use(createRolesRoutes({ people, roles, guard, authz, publisher, idp }))
   .use(createAdminRoutes({ people, guard, idp }))
   .listen({ port: env.port, hostname: env.host });
 

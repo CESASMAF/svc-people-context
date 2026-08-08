@@ -10,18 +10,26 @@
 // `check` devolve `null` quando o Cerbos está indisponível/erro → o caller defere ao
 // resultado do guard local (sem outage). try/catch só no boundary (ADR-014).
 
+// Uma consulta ao PDP. Objeto e não posicional: são 5 campos e trocar `resource` por
+// `action` na chamada compila e vira DENY silencioso.
+export type CerbosCheck = Readonly<{
+  roles: readonly string[];
+  resource: string;
+  action: string;
+  principalId: string;
+  // Vira `resource.attr` no payload. A policy `role.yaml` decide POR ATRIBUTO
+  // (`R.attr.system`, `R.attr.targetRole`, `R.attr.targetUserId`); omiti-los não é
+  // "sem restrição extra", é DENY — a condição não tem como ser avaliada.
+  attr?: Readonly<Record<string, string>>;
+}>;
+
 export interface CerbosClient {
   // `true`/`false` = decisão; `null` = indeterminado (Cerbos off/erro).
-  readonly check: (
-    roles: readonly string[],
-    resource: string,
-    action: string,
-    principalId: string,
-  ) => Promise<boolean | null>;
+  readonly check: (input: CerbosCheck) => Promise<boolean | null>;
 }
 
 export const createCerbosClient = (baseUrl: string): CerbosClient => ({
-  check: async (roles, resource, action, principalId) => {
+  check: async ({ roles, resource, action, principalId, attr }) => {
     try {
       const response = await fetch(`${baseUrl}/api/check/resources`, {
         method: "POST",
@@ -32,7 +40,15 @@ export const createCerbosClient = (baseUrl: string): CerbosClient => ({
             roles: [...roles].sort(),
           },
           resources: [
-            { resource: { kind: resource, id: "*", policyVersion: "default" }, actions: [action] },
+            {
+              resource: {
+                kind: resource,
+                id: "*",
+                policyVersion: "default",
+                ...(attr !== undefined ? { attr } : {}),
+              },
+              actions: [action],
+            },
           ],
         }),
       });
